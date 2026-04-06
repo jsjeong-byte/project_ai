@@ -449,8 +449,10 @@ def run_once(webhook: str, dry_run: bool, verbose: bool, only: str) -> int:
             all_changes.extend(
                 _detect_search_changes(prev_statuses, search_snap)
             )
-        except RuntimeError as e:
-            print(f"[검색광고] {e}", file=sys.stderr, flush=True)
+        except Exception as e:
+            import traceback
+            print(f"[검색광고 오류] {type(e).__name__}: {e}", flush=True)
+            traceback.print_exc()
             errors += 1
 
     # 성과형 디스플레이
@@ -461,8 +463,10 @@ def run_once(webhook: str, dry_run: bool, verbose: bool, only: str) -> int:
             all_changes.extend(
                 _detect_display_changes(prev_statuses, display_snap, DISPLAY_ALERT_STATUSES, DISPLAY_REVIEW_IN_PROGRESS)
             )
-        except RuntimeError as e:
-            print(f"[성과형] {e}", file=sys.stderr, flush=True)
+        except Exception as e:
+            import traceback
+            print(f"[성과형 오류] {type(e).__name__}: {e}", flush=True)
+            traceback.print_exc()
             errors += 1
 
     # 변경 없음

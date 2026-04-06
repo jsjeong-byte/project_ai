@@ -35,7 +35,7 @@ jobs:
           SLACK_INSPECTION_WEBHOOK_URL: ${{ secrets.SLACK_INSPECTION_WEBHOOK_URL }}
 
       - name: 검수 알림 실행
-        run: python scripts/run_naver_inspection_alert.py --only search --verbose
+        run: python scripts/run_naver_inspection_alert.py --only search --verbose 2>&1
         env:
           NAVER_AD_API_KEY:             ${{ secrets.NAVER_API_KEY }}
           NAVER_AD_SECRET_KEY:          ${{ secrets.NAVER_SECRET_KEY }}
