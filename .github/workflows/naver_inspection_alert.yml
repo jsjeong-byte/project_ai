@@ -2,7 +2,6 @@ name: 네이버 소재 검수 알림
 
 on:
   schedule:
-    # 매 15분마다 실행 — KST 09:00~22:00 (UTC 00:00~13:00), 월~토
     - cron: '*/15 0-13 * * 1-6'
   workflow_dispatch:
 
@@ -13,29 +12,70 @@ jobs:
       contents: write
 
     steps:
-      - name: 코드 체크아웃
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Python 3.11 설정
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Secrets 설정 확인
+      - name: 진단 및 알림 실행
         run: |
-          echo "=== Secrets 설정 여부 확인 (값은 비공개) ==="
-          [ -n "$NAVER_AD_API_KEY" ]     && echo "✅ NAVER_API_KEY: 설정됨"     || echo "❌ NAVER_API_KEY: 미설정"
-          [ -n "$NAVER_AD_SECRET_KEY" ]  && echo "✅ NAVER_SECRET_KEY: 설정됨"  || echo "❌ NAVER_SECRET_KEY: 미설정"
-          [ -n "$NAVER_AD_CUSTOMER_ID" ] && echo "✅ NAVER_CUSTOMER_ID: 설정됨" || echo "❌ NAVER_CUSTOMER_ID: 미설정"
-          [ -n "$SLACK_INSPECTION_WEBHOOK_URL" ] && echo "✅ SLACK_WEBHOOK: 설정됨" || echo "❌ SLACK_WEBHOOK: 미설정"
-        env:
-          NAVER_AD_API_KEY:             ${{ secrets.NAVER_API_KEY }}
-          NAVER_AD_SECRET_KEY:          ${{ secrets.NAVER_SECRET_KEY }}
-          NAVER_AD_CUSTOMER_ID:         ${{ secrets.NAVER_CUSTOMER_ID }}
-          SLACK_INSPECTION_WEBHOOK_URL: ${{ secrets.SLACK_INSPECTION_WEBHOOK_URL }}
+          python - <<'PYEOF'
+          import sys, os, json, traceback
+          sys.path.insert(0, '.')
 
-      - name: 검수 알림 실행
-        run: python scripts/run_naver_inspection_alert.py --only search --verbose 2>&1
+          # ── 1. Secrets 확인 ──────────────────────────────────────
+          api_key    = os.environ.get('NAVER_AD_API_KEY', '')
+          secret_key = os.environ.get('NAVER_AD_SECRET_KEY', '')
+          cust_id    = os.environ.get('NAVER_AD_CUSTOMER_ID', '')
+          webhook    = os.environ.get('SLACK_INSPECTION_WEBHOOK_URL', '')
+
+          print(f"[1] NAVER_API_KEY     : {'✅ 설정됨 (' + str(len(api_key)) + '자)' if api_key else '❌ 미설정'}")
+          print(f"[1] NAVER_SECRET_KEY  : {'✅ 설정됨 (' + str(len(secret_key)) + '자)' if secret_key else '❌ 미설정'}")
+          print(f"[1] NAVER_CUSTOMER_ID : {'✅ 설정됨 (' + cust_id + ')' if cust_id else '❌ 미설정'}")
+          print(f"[1] SLACK_WEBHOOK     : {'✅ 설정됨' if webhook else '❌ 미설정'}")
+
+          if not (api_key and secret_key and cust_id and webhook):
+              print("\n❌ Secrets 미설정 — 아래 4개를 GitHub Secrets에 등록하세요:")
+              print("   NAVER_API_KEY / NAVER_SECRET_KEY / NAVER_CUSTOMER_ID / SLACK_INSPECTION_WEBHOOK_URL")
+              sys.exit(1)
+
+          # ── 2. Naver API 연결 테스트 ─────────────────────────────
+          print("\n[2] Naver API 연결 테스트...")
+          try:
+              from src.naver_ads.auth import NaverAdsCredentials, auth_headers
+              import urllib.request, urllib.error
+              creds = NaverAdsCredentials(api_key, secret_key, cust_id)
+              h = auth_headers('GET', '/ncc/campaigns', creds)
+              req = urllib.request.Request('https://api.naver.com/ncc/campaigns', headers=h)
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  data = json.loads(r.read())
+              print(f"[2] ✅ API 연결 성공 — 캠페인 {len(data)}개")
+          except urllib.error.HTTPError as e:
+              body = e.read().decode('utf-8', errors='replace')
+              print(f"[2] ❌ API HTTP 오류 {e.code}: {body}")
+              sys.exit(1)
+          except Exception as e:
+              print(f"[2] ❌ 연결 오류: {type(e).__name__}: {e}")
+              traceback.print_exc()
+              sys.exit(1)
+
+          # ── 3. 본 스크립트 실행 ──────────────────────────────────
+          print("\n[3] 검수 알림 스크립트 실행...")
+          try:
+              import importlib.util
+              spec = importlib.util.spec_from_file_location(
+                  'alert', 'scripts/run_naver_inspection_alert.py')
+              mod = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(mod)
+              ret = mod.run_once(webhook, dry_run=False, verbose=True, only='search')
+              print(f"\n[3] 완료 (return={ret})")
+              sys.exit(ret)
+          except Exception as e:
+              print(f"[3] ❌ 스크립트 오류: {type(e).__name__}: {e}")
+              traceback.print_exc()
+              sys.exit(1)
+          PYEOF
         env:
           NAVER_AD_API_KEY:             ${{ secrets.NAVER_API_KEY }}
           NAVER_AD_SECRET_KEY:          ${{ secrets.NAVER_SECRET_KEY }}
@@ -43,6 +83,7 @@ jobs:
           SLACK_INSPECTION_WEBHOOK_URL: ${{ secrets.SLACK_INSPECTION_WEBHOOK_URL }}
 
       - name: 스냅샷 업데이트 저장
+        if: always()
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
