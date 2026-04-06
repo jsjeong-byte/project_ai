@@ -1,0 +1,52 @@
+name: 네이버 소재 검수 알림
+
+on:
+  schedule:
+    # 매 15분마다 실행 — KST 09:00~22:00 (UTC 00:00~13:00), 월~토
+    - cron: '*/15 0-13 * * 1-6'
+  workflow_dispatch:  # GitHub UI에서 수동 실행 가능
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 스냅샷 커밋을 위해 필요
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Python 3.11 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 표준 라이브러리만 사용하므로 pip install 불필요
+
+      - name: 자격증명 파일 생성
+        run: |
+          mkdir -p .credentials
+          printf 'API_KEY=%s\nSECRET_KEY=%s\nCUSTOMER_ID=%s\n' \
+            "$NAVER_API_KEY" "$NAVER_SECRET_KEY" "$NAVER_CUSTOMER_ID" \
+            > .credentials/naver_ads_credentials.txt
+          echo "$SLACK_WEBHOOK_URL" > .credentials/slack_inspection_webhook_url.txt
+        env:
+          NAVER_API_KEY:     ${{ secrets.NAVER_API_KEY }}
+          NAVER_SECRET_KEY:  ${{ secrets.NAVER_SECRET_KEY }}
+          NAVER_CUSTOMER_ID: ${{ secrets.NAVER_CUSTOMER_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_INSPECTION_WEBHOOK_URL }}
+
+      - name: 검수 알림 실행
+        run: python scripts/run_naver_inspection_alert.py --only search --verbose
+
+      - name: 스냅샷 업데이트 저장
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/naver_ads_inspection_snapshot.json
+          git diff --cached --quiet \
+            || git commit -m "chore: update inspection snapshot [skip ci]"
+          git pull --rebase origin HEAD
+          git push

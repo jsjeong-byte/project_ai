@@ -1,0 +1,28 @@
+# ── 절대 커밋 금지 (자격증명 / 토큰) ─────────────────────────────────────────
+.credentials/
+*.credentials
+*.env
+.env*
+*_secret*.json
+*_credentials*.json
+*_token*.json
+client_secret*.json
+ad-settlement-*.json
+sheets_token*.json
+
+# Google OAuth / 서비스계정
+client_secret.json
+
+# 로그
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
