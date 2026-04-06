@@ -15,31 +15,21 @@ jobs:
     steps:
       - name: 코드 체크아웃
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Python 3.11 설정
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 표준 라이브러리만 사용하므로 pip install 불필요
-
-      - name: 자격증명 파일 생성
-        run: |
-          mkdir -p .credentials
-          printf 'API_KEY=%s\nSECRET_KEY=%s\nCUSTOMER_ID=%s\n' \
-            "$NAVER_API_KEY" "$NAVER_SECRET_KEY" "$NAVER_CUSTOMER_ID" \
-            > .credentials/naver_ads_credentials.txt
-          echo "$SLACK_WEBHOOK_URL" > .credentials/slack_inspection_webhook_url.txt
-        env:
-          NAVER_API_KEY:     ${{ secrets.NAVER_API_KEY }}
-          NAVER_SECRET_KEY:  ${{ secrets.NAVER_SECRET_KEY }}
-          NAVER_CUSTOMER_ID: ${{ secrets.NAVER_CUSTOMER_ID }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_INSPECTION_WEBHOOK_URL }}
-
       - name: 검수 알림 실행
         run: python scripts/run_naver_inspection_alert.py --only search --verbose
+        env:
+          # auth.py 가 직접 읽는 환경변수 (파일 생성 불필요)
+          NAVER_AD_API_KEY:             ${{ secrets.NAVER_API_KEY }}
+          NAVER_AD_SECRET_KEY:          ${{ secrets.NAVER_SECRET_KEY }}
+          NAVER_AD_CUSTOMER_ID:         ${{ secrets.NAVER_CUSTOMER_ID }}
+          # run_naver_inspection_alert.py 가 직접 읽는 환경변수
+          SLACK_INSPECTION_WEBHOOK_URL: ${{ secrets.SLACK_INSPECTION_WEBHOOK_URL }}
 
       - name: 스냅샷 업데이트 저장
         run: |
@@ -48,5 +38,5 @@ jobs:
           git add data/naver_ads_inspection_snapshot.json
           git diff --cached --quiet \
             || git commit -m "chore: update inspection snapshot [skip ci]"
-          git pull --rebase origin HEAD
+          git pull --rebase origin main
           git push
