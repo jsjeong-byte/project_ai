@@ -4,13 +4,13 @@ on:
   schedule:
     # 매 15분마다 실행 — KST 09:00~22:00 (UTC 00:00~13:00), 월~토
     - cron: '*/15 0-13 * * 1-6'
-  workflow_dispatch:  # GitHub UI에서 수동 실행 가능
+  workflow_dispatch:
 
 jobs:
   alert:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # 스냅샷 커밋을 위해 필요
+      contents: write
 
     steps:
       - name: 코드 체크아웃
@@ -21,14 +21,25 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 검수 알림 실행
-        run: python scripts/run_naver_inspection_alert.py --only search --verbose
+      - name: Secrets 설정 확인
+        run: |
+          echo "=== Secrets 설정 여부 확인 (값은 비공개) ==="
+          [ -n "$NAVER_AD_API_KEY" ]     && echo "✅ NAVER_API_KEY: 설정됨"     || echo "❌ NAVER_API_KEY: 미설정"
+          [ -n "$NAVER_AD_SECRET_KEY" ]  && echo "✅ NAVER_SECRET_KEY: 설정됨"  || echo "❌ NAVER_SECRET_KEY: 미설정"
+          [ -n "$NAVER_AD_CUSTOMER_ID" ] && echo "✅ NAVER_CUSTOMER_ID: 설정됨" || echo "❌ NAVER_CUSTOMER_ID: 미설정"
+          [ -n "$SLACK_INSPECTION_WEBHOOK_URL" ] && echo "✅ SLACK_WEBHOOK: 설정됨" || echo "❌ SLACK_WEBHOOK: 미설정"
         env:
-          # auth.py 가 직접 읽는 환경변수 (파일 생성 불필요)
           NAVER_AD_API_KEY:             ${{ secrets.NAVER_API_KEY }}
           NAVER_AD_SECRET_KEY:          ${{ secrets.NAVER_SECRET_KEY }}
           NAVER_AD_CUSTOMER_ID:         ${{ secrets.NAVER_CUSTOMER_ID }}
-          # run_naver_inspection_alert.py 가 직접 읽는 환경변수
+          SLACK_INSPECTION_WEBHOOK_URL: ${{ secrets.SLACK_INSPECTION_WEBHOOK_URL }}
+
+      - name: 검수 알림 실행
+        run: python scripts/run_naver_inspection_alert.py --only search --verbose
+        env:
+          NAVER_AD_API_KEY:             ${{ secrets.NAVER_API_KEY }}
+          NAVER_AD_SECRET_KEY:          ${{ secrets.NAVER_SECRET_KEY }}
+          NAVER_AD_CUSTOMER_ID:         ${{ secrets.NAVER_CUSTOMER_ID }}
           SLACK_INSPECTION_WEBHOOK_URL: ${{ secrets.SLACK_INSPECTION_WEBHOOK_URL }}
 
       - name: 스냅샷 업데이트 저장
