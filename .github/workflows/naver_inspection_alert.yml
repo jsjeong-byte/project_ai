@@ -25,18 +25,26 @@ jobs:
           sys.path.insert(0, '.')
 
           # ── 1. Secrets 확인 ──────────────────────────────────────
-          api_key    = os.environ.get('NAVER_AD_API_KEY', '')
-          secret_key = os.environ.get('NAVER_AD_SECRET_KEY', '')
-          cust_id    = os.environ.get('NAVER_AD_CUSTOMER_ID', '')
-          webhook    = os.environ.get('SLACK_INSPECTION_WEBHOOK_URL', '')
+          api_key    = os.environ.get('NAVER_AD_API_KEY', '').strip()
+          secret_key = os.environ.get('NAVER_AD_SECRET_KEY', '').strip()
+          cust_id    = os.environ.get('NAVER_AD_CUSTOMER_ID', '').strip()
+          # Slack webhook — 여러 Secret 이름 폴백
+          webhook = ''
+          for _wname in ('SLACK_INSPECTION_WEBHOOK_URL', 'SLACK_WEBHOOK_URL', 'SLACK_WEBHOOK'):
+              _w = os.environ.get(_wname, '').strip()
+              if _w:
+                  webhook = _w
+                  print(f"[1] SLACK_WEBHOOK     : ✅ 설정됨 (변수명={_wname}, 앞30자={_w[:30]})")
+                  break
+          else:
+              print("[1] SLACK_WEBHOOK     : ❌ 미설정 (SLACK_INSPECTION_WEBHOOK_URL / SLACK_WEBHOOK_URL / SLACK_WEBHOOK 모두 없음)")
 
           print(f"[1] NAVER_API_KEY     : {'✅ 설정됨 (' + str(len(api_key)) + '자)' if api_key else '❌ 미설정'}")
           print(f"[1] NAVER_SECRET_KEY  : {'✅ 설정됨 (' + str(len(secret_key)) + '자)' if secret_key else '❌ 미설정'}")
           print(f"[1] NAVER_CUSTOMER_ID : {'✅ 설정됨 (' + cust_id + ')' if cust_id else '❌ 미설정'}")
-          print(f"[1] SLACK_WEBHOOK     : {'✅ 설정됨' if webhook else '❌ 미설정'}")
 
           if not (api_key and secret_key and cust_id and webhook):
-              print("\n❌ Secrets 미설정 — 아래 4개를 GitHub Secrets에 등록하세요:")
+              print("\n❌ Secrets 미설정 — GitHub 저장소 Settings > Secrets > Actions 에서 확인:")
               print("   NAVER_API_KEY / NAVER_SECRET_KEY / NAVER_CUSTOMER_ID / SLACK_INSPECTION_WEBHOOK_URL")
               sys.exit(1)
 

@@ -91,9 +91,16 @@ STATUS_EMOJI: dict[str, str] = {
 # ─── Slack ────────────────────────────────────────────────────────────────────
 
 def _resolve_webhook() -> str:
-    w = os.environ.get("SLACK_INSPECTION_WEBHOOK_URL", "").strip()
-    if w:
-        return w
+    # 환경변수 우선 (여러 이름 폴백 지원)
+    for env_name in (
+        "SLACK_INSPECTION_WEBHOOK_URL",
+        "SLACK_WEBHOOK_URL",
+        "SLACK_WEBHOOK",
+    ):
+        w = os.environ.get(env_name, "").strip()
+        if w:
+            return w
+    # 파일 폴백
     if WEBHOOK_FILE.is_file():
         for line in WEBHOOK_FILE.read_text(encoding="utf-8").splitlines():
             line = line.strip()
