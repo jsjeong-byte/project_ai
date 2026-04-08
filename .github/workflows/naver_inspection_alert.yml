@@ -68,27 +68,8 @@ jobs:
               traceback.print_exc()
               sys.exit(1)
 
-          # ── 3. Slack 테스트 메시지 ───────────────────────────────
-          print("\n[3] Slack 테스트 메시지 전송...")
-          try:
-              import urllib.request, json as _json
-              test_payload = {"text": "✅ 네이버 소재 검수 알림봇 연결 테스트 성공!\n(이 메시지가 보이면 Slack 웹훅 정상 동작 중입니다)"}
-              req = urllib.request.Request(
-                  webhook,
-                  data=_json.dumps(test_payload).encode(),
-                  headers={"Content-Type": "application/json"},
-                  method="POST",
-              )
-              with urllib.request.urlopen(req, timeout=10) as r:
-                  resp = r.read().decode()
-              print(f"[3] ✅ Slack 전송 성공 (응답: {resp})")
-          except Exception as e:
-              print(f"[3] ❌ Slack 전송 실패: {type(e).__name__}: {e}")
-              traceback.print_exc()
-              sys.exit(1)
-
-          # ── 4. 본 스크립트 실행 ──────────────────────────────────
-          print("\n[4] 검수 알림 스크립트 실행...")
+          # ── 3. 본 스크립트 실행 ──────────────────────────────────
+          print("\n[3] 검수 알림 스크립트 실행...")
           try:
               import importlib.util
               spec = importlib.util.spec_from_file_location(
@@ -96,10 +77,10 @@ jobs:
               mod = importlib.util.module_from_spec(spec)
               spec.loader.exec_module(mod)
               ret = mod.run_once(webhook, dry_run=False, verbose=True, only='search')
-              print(f"\n[4] 완료 (return={ret})")
+              print(f"\n[3] 완료 (return={ret})")
               sys.exit(ret)
           except Exception as e:
-              print(f"[4] ❌ 스크립트 오류: {type(e).__name__}: {e}")
+              print(f"[3] ❌ 스크립트 오류: {type(e).__name__}: {e}")
               traceback.print_exc()
               sys.exit(1)
           PYEOF

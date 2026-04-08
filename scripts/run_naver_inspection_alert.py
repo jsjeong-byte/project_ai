@@ -212,16 +212,20 @@ def _final_alert_type(new_composite: str, prev_composite: str) -> str | None:
     if inspect == "REVIEW_VERIFIED":
         return "검토 완료"
 
-    # 이전이 보류였는데 지금 승인 → 보류 해제
     prev_inspect = prev_composite.split("|", 1)[0] if prev_composite else ""
     prev_reason  = prev_composite.split("|", 1)[1] if "|" in prev_composite else ""
     prev_was_hold = (prev_reason == "AD_DISAPPROVED" or prev_inspect in ("WAIT", "PENDING"))
-    if prev_was_hold and inspect in ("APPROVED", "ELIGIBLE"):
-        return "검토 완료 (보류 해제)"
 
-    # 처음 보는 소재(prev 없음)인데 이미 승인 상태 → 신규 통과
-    if not prev_composite and inspect in ("APPROVED", "ELIGIBLE"):
-        return "검토 완료 (신규 통과)"
+    if inspect in ("APPROVED", "ELIGIBLE"):
+        if not prev_composite:
+            # 처음 보는 소재인데 이미 승인 상태 → 신규 통과
+            return "검토 완료 (신규 통과)"
+        if prev_was_hold:
+            # 보류 → 통과
+            return "검토 완료 (보류 해제)"
+        if prev_inspect in _SEARCH_IN_REVIEW:
+            # 검수 진행 중 → 통과
+            return "검토 완료 (검수 통과)"
 
     return None
 
