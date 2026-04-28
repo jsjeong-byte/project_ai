@@ -1,0 +1,10 @@
+requests>=2.31.0
+beautifulsoup4>=4.12.3
+selenium>=4.20.0
+webdriver-manager>=4.0.2
+
+# incremental 모드에서 Google Sheets batchUpdate (SheetsClient)
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0

@@ -1,0 +1,98 @@
+name: 키워드사운드 검색량 테이블 → Sheets 반영
+
+on:
+  schedule:
+    - cron: '20 1 * * *'   # 매일 KST 10:20 (UTC 01:20)
+  workflow_dispatch:
+    inputs:
+      spreadsheet_id:
+        description: '대상 스프레드시트 ID (/d/<ID>/)'
+        required: false
+        default: '1M0JyzNtz5jQNguET_GksQ9FDtbWqIsfp_GqEXqG1tC0'
+      gid:
+        description: '대상 워크시트 gid (URL #gid= 값, 첫 탭은 보통 0)'
+        required: false
+        default: '0'
+      keywords_range:
+        description: '키워드 목록 범위'
+        required: false
+        default: 'AH26:AH31'
+      target_range:
+        description: '표 범위 (A1 시작 권장)'
+        required: false
+        default: 'A1:U204'
+      mode:
+        description: 'incremental(기본) | full'
+        required: false
+        default: 'incremental'
+  repository_dispatch:
+    types: [keywordsound-sync]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 의존성 설치
+        run: |
+          pip install -r requirements-keywordsound.txt
+
+      - name: Secrets 확인
+        run: |
+          python - <<'PY'
+          import os, sys
+          has_g = bool(os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip())
+          has_p = bool(os.environ.get("PROXY_API_KEY", "").strip())
+          print("  Google SA JSON:", "설정됨" if has_g else "미설정")
+          print("  PROXY_API_KEY:", "설정됨" if has_p else "미설정")
+          if not has_g and not has_p:
+              print("\n❌ GOOGLE_SERVICE_ACCOUNT_JSON 또는 PROXY_API_KEY 중 하나는 필요합니다.")
+              sys.exit(1)
+          PY
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}
+
+      - name: 키워드사운드 동기화 실행
+        shell: bash
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+          SPREADSHEET_ID="${{ github.event.inputs.spreadsheet_id }}"
+          GID="${{ github.event.inputs.gid }}"
+          KEYWORDS_RANGE="${{ github.event.inputs.keywords_range }}"
+          TARGET_RANGE="${{ github.event.inputs.target_range }}"
+          MODE="${{ github.event.inputs.mode }}"
+
+          SPREADSHEET_ID="${SPREADSHEET_ID:-1M0JyzNtz5jQNguET_GksQ9FDtbWqIsfp_GqEXqG1tC0}"
+          GID="${GID:-0}"
+          KEYWORDS_RANGE="${KEYWORDS_RANGE:-AH26:AH31}"
+          TARGET_RANGE="${TARGET_RANGE:-A1:U204}"
+          MODE="${MODE:-incremental}"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "repository_dispatch" ]]; then
+            echo "repository_dispatch payload 사용 (GITHUB_EVENT_PATH + jq)"
+            CLIENT_JSON="$(jq -c '.client_payload' "$GITHUB_EVENT_PATH")"
+            python scripts/keywordsound_volume_sync.py \
+              --github-dispatch-json "$CLIENT_JSON"
+          else
+            echo "workflow_dispatch / schedule"
+            python scripts/keywordsound_volume_sync.py \
+              --spreadsheet-id "$SPREADSHEET_ID" \
+              --gid "$GID" \
+              --keywords-range "$KEYWORDS_RANGE" \
+              --target-range "$TARGET_RANGE" \
+              --mode "$MODE"
+          fi
