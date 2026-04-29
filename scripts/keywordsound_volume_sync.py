@@ -72,6 +72,10 @@ def _is_google_sheets_http_403(exc: BaseException) -> bool:
     return False
 
 
+def _google_sa_json_configured() -> bool:
+    return bool((os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip())
+
+
 def _service_account_email_for_hint() -> str:
     raw = (os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
     if not raw:
@@ -731,6 +735,16 @@ def load_keywords(
     except Exception as e:
         if _is_google_sheets_http_403(e):
             raise RuntimeError(_sheets_403_message(spreadsheet_id=spreadsheet_id, what="키워드 범위 읽기")) from e
+        if _google_sa_json_configured():
+            raise RuntimeError(
+                "Google Sheets 로 키워드 범위를 읽지 못했습니다. "
+                "GOOGLE_SERVICE_ACCOUNT_JSON 이 설정되어 있어 프록시(api-auth.madup-dct.site)로는 넘기지 않습니다(502 등).\n"
+                "· JSON 의 client_email 을 이 스프레드시트에「편집자」로 공유했는지 확인\n"
+                "· 시트 URL 의 ID 와 실행 중인 spreadsheet_id 가 같은지 확인\n"
+                f"  spreadsheet_id={spreadsheet_id}\n"
+                f"  client_email 힌트: {_service_account_email_for_hint()}\n"
+                f"원본 오류: {e!r}"
+            ) from e
         if not api_key:
             raise RuntimeError(
                 "시트에서 키워드를 읽을 수 없습니다. "
@@ -754,6 +768,14 @@ def resolve_worksheet_title(api_key: Optional[str], spreadsheet_id: str, gid: Op
     except Exception as e:
         if _is_google_sheets_http_403(e):
             raise RuntimeError(_sheets_403_message(spreadsheet_id=spreadsheet_id, what="시트 이름(gid) 조회")) from e
+        if _google_sa_json_configured():
+            raise RuntimeError(
+                "Google Sheets 로 gid→시트 이름을 조회하지 못했습니다. "
+                "GOOGLE_SERVICE_ACCOUNT_JSON 이 있으면 프록시로 대체하지 않습니다.\n"
+                f"  spreadsheet_id={spreadsheet_id}, gid={gid}\n"
+                f"  client_email 힌트: {_service_account_email_for_hint()}\n"
+                f"원본 오류: {e!r}"
+            ) from e
         if not api_key:
             raise RuntimeError(
                 "gid 로 시트 이름을 알 수 없습니다. GOOGLE_SERVICE_ACCOUNT_JSON 또는 PROXY_API_KEY 를 확인하세요."
