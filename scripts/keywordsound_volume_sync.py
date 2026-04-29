@@ -59,6 +59,42 @@ KST = ZoneInfo("Asia/Seoul")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
+def _is_google_sheets_http_403(exc: BaseException) -> bool:
+    try:
+        from googleapiclient.errors import HttpError
+    except ImportError:
+        return False
+    if isinstance(exc, HttpError) and exc.resp is not None:
+        try:
+            return int(exc.resp.status) == 403
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def _service_account_email_for_hint() -> str:
+    raw = (os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
+    if not raw:
+        return "JSON Secret 의 client_email 값"
+    try:
+        em = json.loads(raw).get("client_email")
+        if em:
+            return str(em)
+    except Exception:
+        pass
+    return "JSON 의 client_email 값"
+
+
+def _sheets_403_message(*, spreadsheet_id: str, what: str) -> str:
+    email = _service_account_email_for_hint()
+    return (
+        f"Google Sheets API 403 ({what}): 서비스 계정에 이 스프레드시트 접근 권한이 없습니다.\n"
+        f"  · 스프레드시트 ID: {spreadsheet_id}\n"
+        f"  · 아래 이메일을 구글 시트「공유」에「편집자」로 추가하세요: {email}\n"
+        "  · (다른 Google 계정으로 만든 JSON 이면, 그 client_email 이 시트에 있어야 합니다.)"
+    )
+
+
 def _h(api_key: str) -> dict:
     return {"X-API-Key": api_key, "Content-Type": "application/json"}
 
@@ -693,6 +729,8 @@ def load_keywords(
         sheets = build_sheets_client()
         rows = sheets.get_values(spreadsheet_id, a1_range(worksheet, keywords_range))
     except Exception as e:
+        if _is_google_sheets_http_403(e):
+            raise RuntimeError(_sheets_403_message(spreadsheet_id=spreadsheet_id, what="키워드 범위 읽기")) from e
         if not api_key:
             raise RuntimeError(
                 "시트에서 키워드를 읽을 수 없습니다. "
@@ -714,6 +752,8 @@ def resolve_worksheet_title(api_key: Optional[str], spreadsheet_id: str, gid: Op
         sheets = build_sheets_client()
         return sheets.get_sheet_title_by_gid(spreadsheet_id, int(gid))
     except Exception as e:
+        if _is_google_sheets_http_403(e):
+            raise RuntimeError(_sheets_403_message(spreadsheet_id=spreadsheet_id, what="시트 이름(gid) 조회")) from e
         if not api_key:
             raise RuntimeError(
                 "gid 로 시트 이름을 알 수 없습니다. GOOGLE_SERVICE_ACCOUNT_JSON 또는 PROXY_API_KEY 를 확인하세요."
