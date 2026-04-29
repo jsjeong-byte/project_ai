@@ -685,14 +685,21 @@ def load_keywords(
     keywords_range: str,
     api_key: Optional[str],
 ) -> list[str]:
-    rows: list[list[str]]
-    if api_key:
-        rows = sheets_read(api_key, spreadsheet_id, worksheet, keywords_range)
-    else:
-        from src.creative_tagging.sheets_client import SheetsClient, a1_range
+    from src.creative_tagging.sheets_client import a1_range
 
+    rows: list[list[str]]
+    # PROXY 와 Google 둘 다 있으면 예전엔 프록시를 먼저 써서 502 등에 막힘 → Sheets API 우선
+    try:
         sheets = build_sheets_client()
         rows = sheets.get_values(spreadsheet_id, a1_range(worksheet, keywords_range))
+    except Exception as e:
+        if not api_key:
+            raise RuntimeError(
+                "시트에서 키워드를 읽을 수 없습니다. "
+                "GitHub Secret GOOGLE_SERVICE_ACCOUNT_JSON(권장) 또는 "
+                "동작하는 PROXY_API_KEY 가 필요합니다."
+            ) from e
+        rows = sheets_read(api_key, spreadsheet_id, worksheet, keywords_range)
     keywords = [normalize_keyword(r[0]) for r in rows if r and normalize_keyword(r[0])]
     seen: set[str] = set()
     return [k for k in keywords if not (k in seen or seen.add(k))]
@@ -703,10 +710,15 @@ def resolve_worksheet_title(api_key: Optional[str], spreadsheet_id: str, gid: Op
         return worksheet
     if gid is None:
         raise RuntimeError("--gid 또는 --worksheet 필요")
-    if not api_key:
+    try:
         sheets = build_sheets_client()
         return sheets.get_sheet_title_by_gid(spreadsheet_id, int(gid))
-    return worksheet_title_from_gid(api_key, spreadsheet_id, int(gid))
+    except Exception as e:
+        if not api_key:
+            raise RuntimeError(
+                "gid 로 시트 이름을 알 수 없습니다. GOOGLE_SERVICE_ACCOUNT_JSON 또는 PROXY_API_KEY 를 확인하세요."
+            ) from e
+        return worksheet_title_from_gid(api_key, spreadsheet_id, int(gid))
 
 
 def main() -> None:
