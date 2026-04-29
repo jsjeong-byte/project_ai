@@ -43,6 +43,40 @@ jobs:
         run: |
           pip install -r requirements-keywordsound.txt
 
+      # ubuntu-latest 에는 Chrome 이 없어 Selenium이 실패하는 경우가 많음
+      - name: Google Chrome 설치 (Selenium / keywordsound)
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y wget
+          wget -nv -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo dpkg -i /tmp/chrome.deb || sudo apt-get -f install -y
+          google-chrome --version
+
+      - name: GOOGLE_SERVICE_ACCOUNT_JSON 형식 검사
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          raw = (os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
+          if not raw:
+              print("(미설정 — PROXY 만 쓰는 경우 생략)")
+              sys.exit(0)
+          try:
+              d = json.loads(raw)
+          except json.JSONDecodeError as e:
+              print("❌ GOOGLE_SERVICE_ACCOUNT_JSON 이 올바른 JSON 이 아닙니다.")
+              print("   GitHub Secret 에는 파일 경로가 아니라, .json 파일 내용 전체를 붙여넣어야 합니다.")
+              print("   (앞뒤에 따옴표를 더 붙이거나, 일부만 넣으면 안 됩니다.)")
+              raise SystemExit(1) from e
+          for k in ("type", "project_id", "private_key", "client_email"):
+              if k not in d:
+                  print(f"❌ JSON 에 필수 키 없음: {k}")
+                  raise SystemExit(1)
+          print("OK: 서비스 계정 JSON 필드 확인")
+          PY
+
       - name: Secrets 확인
         run: |
           python - <<'PY'
@@ -64,8 +98,9 @@ jobs:
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}
+          PYTHONUNBUFFERED: "1"
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           if ! command -v jq >/dev/null 2>&1; then
             sudo apt-get update -y
             sudo apt-get install -y jq
