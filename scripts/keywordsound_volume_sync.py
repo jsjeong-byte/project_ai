@@ -226,10 +226,17 @@ def build_sheets_client():
     if path and Path(path).is_file():
         return SheetsClient.from_service_account(path)
 
-    from scripts.run_daily_cost_report import _build_sheets_client, _load_config
+    try:
+        from scripts.run_daily_cost_report import _build_sheets_client, _load_config
 
-    cfg = _load_config()
-    return _build_sheets_client(cfg)
+        cfg = _load_config()
+        return _build_sheets_client(cfg)
+    except ImportError:
+        raise RuntimeError(
+            "Google Sheets 자격이 없습니다. GitHub Actions Secrets에 "
+            "GOOGLE_SERVICE_ACCOUNT_JSON(서비스 계정 JSON 전체)를 넣거나, "
+            "PROXY_API_KEY(프록시 read/upload)를 설정하세요."
+        ) from None
 
 
 class KeywordSoundScraper:
@@ -704,7 +711,8 @@ def resolve_worksheet_title(api_key: Optional[str], spreadsheet_id: str, gid: Op
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="keywordsound 검색량 → Google Sheets")
-    ap.add_argument("--spreadsheet-id", required=True)
+    # repository_dispatch 는 --github-dispatch-json 만 넘기므로, 병합 전에는 비워 둘 수 있음
+    ap.add_argument("--spreadsheet-id", default="", help="스프레드시트 ID (dispatch JSON에 있으면 생략 가능)")
     ap.add_argument("--gid", type=int, default=None)
     ap.add_argument("--worksheet", default=None)
     ap.add_argument("--keywords-range", default="AH26:AH31")
@@ -756,6 +764,14 @@ def main() -> None:
         if payload.get("dates"):
             dl = payload["dates"]
             args.dates = ",".join(str(x) for x in dl) if isinstance(dl, list) else str(dl)
+
+    sid = (args.spreadsheet_id or "").strip()
+    if not sid:
+        raise RuntimeError(
+            "spreadsheet_id 가 없습니다. --spreadsheet-id 를 주거나, "
+            "--github-dispatch-json(client_payload)에 spreadsheet_id 를 넣으세요."
+        )
+    args.spreadsheet_id = sid
 
     api_key: Optional[str] = None
     try:
