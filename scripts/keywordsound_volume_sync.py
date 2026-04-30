@@ -542,6 +542,11 @@ def run_incremental_google(
         if _DATE_RE.match(ds):
             date_to_row[ds] = i + 2  # sheet row
 
+    print(
+        f"\n[incremental] worksheet={worksheet!r} | date_column={dc_letter} | "
+        f"target_range={target_range} | 시트에 이미 있는 날짜: {len(date_to_row)}개"
+    )
+
     first_empty = first_empty_row_in_column(
         col_dates, sheet_start_row=2, expected_rows=n_body_rows, column_letter=dc_letter
     )
@@ -551,6 +556,10 @@ def run_incremental_google(
     pending_new_dates = {d for d in want if d not in date_to_row}
     updates: List[Tuple[str, List[List[Any]]]] = []
 
+    n_header_skipped = 0
+    n_kw_header_ok = 0
+    n_kw_any_numeric = 0
+
     for kw in keywords:
         print(f"\n[수집] {kw} ({len(want)}일)")
         got = scraper.fetch_totals_for_dates(kw, want)
@@ -558,7 +567,11 @@ def run_incremental_google(
         col_idx = kw_to_col.get(kw)
         if col_idx is None:
             print(f"  - 스킵: 1행에 '{kw}' 헤더 없음")
+            n_header_skipped += 1
             continue
+        n_kw_header_ok += 1
+        if any(got.get(d) is not None for d in want):
+            n_kw_any_numeric += 1
         col_letter = index_to_col_letters(col_idx)
         for d in sorted(want):
             total = got.get(d)
@@ -588,8 +601,31 @@ def run_incremental_google(
         return
 
     if not updates:
-        print("\n[결과] 반영할 업데이트 없음")
-        return
+        lines = [
+            "시트에 쓸 갱신이 한 건도 없습니다. (Actions는 초록이어도 시트는 그대로일 수 있음)",
+            f"spreadsheet_id={spreadsheet_id} | worksheet={worksheet!r} | date_column={dc_letter}",
+            f"target_dates={sorted(want)}",
+            f"keywords={keywords!r} (총 {len(keywords)}개)",
+            f"1행에서 인식한 키워드 헤더(일부): {list(kw_to_col.keys())[:25]}",
+            f"헤더 불일치로 스킵된 키워드: {n_header_skipped}/{len(keywords)}",
+            f"keywordsound에서 요청 날짜에 숫자를 받은 키워드: {n_kw_any_numeric}/{len(keywords)} (헤더 매칭된 {n_kw_header_ok}개 중)",
+        ]
+        if n_header_skipped == len(keywords):
+            lines.append(
+                "→ AH… 등 키워드 셀 값과 표 1행 제목이 정확히 같은지 확인하세요. "
+                f"날짜 열({dc_letter})은 키워드 후보에서 제외됩니다."
+            )
+        elif n_kw_any_numeric == 0:
+            lines.append(
+                "→ keywordsound가 요청한 날짜에 검색량을 주지 않았습니다. 사이트에서 해당 키워드·날짜를 확인하세요."
+            )
+        elif pending_new_dates:
+            lines.append(
+                f"→ 새 날짜를 쓰지 못한 채 남은 날짜: {sorted(pending_new_dates)} (위 [경고] 참고)"
+            )
+        else:
+            lines.append("→ 로그 위쪽 [수집]/[경고] 줄을 확인하세요.")
+        raise RuntimeError("\n".join(lines))
 
     print(f"\n[Sheets] batchUpdate {len(updates)} 블록")
     sheets.batch_write(spreadsheet_id, updates)
@@ -661,6 +697,9 @@ def run_incremental_proxy(
     want = set(target_dates)
     pending_new_dates = {d for d in want if d not in date_to_row}
     touched = 0
+    n_header_skipped = 0
+    n_kw_header_ok = 0
+    n_kw_any_numeric = 0
 
     for kw in keywords:
         print(f"\n[수집] {kw}")
@@ -669,7 +708,11 @@ def run_incremental_proxy(
         col_idx = kw_to_col.get(kw)
         if col_idx is None:
             print(f"  - 스킵: 1행에 '{kw}' 없음")
+            n_header_skipped += 1
             continue
+        n_kw_header_ok += 1
+        if any(got.get(d) is not None for d in want):
+            n_kw_any_numeric += 1
         for d in sorted(want):
             total = got.get(d)
             if total is None:
@@ -706,8 +749,18 @@ def run_incremental_proxy(
         print(f"\n[dry-run] proxy overwrite 스킵. touched_cells~={touched}")
         return
     if not touched:
-        print("\n[결과] 반영 없음")
-        return
+        lines = [
+            "프록시 경로에서 시트에 반영한 셀이 없습니다.",
+            f"spreadsheet_id={spreadsheet_id} | worksheet={worksheet!r} | date_column={dc_letter}",
+            f"target_dates={sorted(want)} | keywords={keywords!r}",
+            f"헤더 키(일부): {list(kw_to_col.keys())[:25]}",
+            f"헤더 스킵: {n_header_skipped}/{len(keywords)} | keywordsound에 값 있음: {n_kw_any_numeric}키워드",
+        ]
+        if n_header_skipped == len(keywords):
+            lines.append("→ 1행 제목과 키워드 목록(AH…) 문자열이 같은지 확인하세요.")
+        elif n_kw_any_numeric == 0:
+            lines.append("→ keywordsound가 요청 날짜에 데이터를 주지 않았습니다.")
+        raise RuntimeError("\n".join(lines))
     print(f"\n[프록시] overwrite {target_range} ({touched}셀 변경)")
     sheets_upload_overwrite(api_key, spreadsheet_id, worksheet, grid)
     print("[완료]")
