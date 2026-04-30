@@ -75,6 +75,23 @@ def _is_google_sheets_http_403(exc: BaseException) -> bool:
     return False
 
 
+def _is_range_exceeds_grid_error(exc: BaseException) -> bool:
+    """AH 등 범위가 시트 실제 열/행보다 클 때 Google API 400."""
+    try:
+        from googleapiclient.errors import HttpError
+    except ImportError:
+        return False
+    if not isinstance(exc, HttpError) or exc.resp is None:
+        return False
+    try:
+        if int(exc.resp.status) != 400:
+            return False
+    except (TypeError, ValueError):
+        return False
+    body = (exc.content or b"").decode("utf-8", errors="replace").lower()
+    return "exceeds grid limits" in body or "exceeds grid limit" in body
+
+
 def _google_sa_json_configured() -> bool:
     return bool((os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip())
 
@@ -890,10 +907,22 @@ def load_keywords(
     # PROXY 와 Google 둘 다 있으면 예전엔 프록시를 먼저 써서 502 등에 막힘 → Sheets API 우선
     try:
         sheets = build_sheets_client()
-        rows = sheets.get_values(spreadsheet_id, a1_range(worksheet, keywords_range))
+        try:
+            rows = sheets.get_values(spreadsheet_id, a1_range(worksheet, keywords_range))
+        except Exception as ge:
+            if _is_range_exceeds_grid_error(ge):
+                raise RuntimeError(
+                    f"키워드 범위 {keywords_range!r} 가 이 시트의 실제 열·행 범위를 넘습니다. "
+                    "구글 시트에 있는 열까지만 지정하세요. "
+                    "(예: 시트가 열 33개면 마지막은 AG이고, AH는 없습니다. "
+                    "Apps Script 상단 `DEFAULT_KEYWORDS_RANGE` 를 `A26:A31` 같이 좁은 범위로 바꾸세요.)"
+                ) from ge
+            if _is_google_sheets_http_403(ge):
+                raise RuntimeError(_sheets_403_message(spreadsheet_id=spreadsheet_id, what="키워드 범위 읽기")) from ge
+            raise
+    except RuntimeError:
+        raise
     except Exception as e:
-        if _is_google_sheets_http_403(e):
-            raise RuntimeError(_sheets_403_message(spreadsheet_id=spreadsheet_id, what="키워드 범위 읽기")) from e
         if _google_sa_json_configured():
             raise RuntimeError(
                 "Google Sheets 로 키워드 범위를 읽지 못했습니다. "
@@ -952,7 +981,11 @@ def main() -> None:
     ap.add_argument("--spreadsheet-id", default="", help="스프레드시트 ID (dispatch JSON에 있으면 생략 가능)")
     ap.add_argument("--gid", type=int, default=None)
     ap.add_argument("--worksheet", default=None)
-    ap.add_argument("--keywords-range", default="AH26:AH31")
+    ap.add_argument(
+        "--keywords-range",
+        default="A26:A31",
+        help="키워드 목록 범위(시트 실제 열 안). 넓은 표만 쓰면 AH 등으로 변경",
+    )
     ap.add_argument("--target-range", default="A1:U204")
     ap.add_argument(
         "--date-column",

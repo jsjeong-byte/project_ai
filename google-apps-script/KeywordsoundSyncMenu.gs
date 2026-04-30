@@ -34,8 +34,8 @@
  * 동작: repository_dispatch (keywordsound-sync) → GitHub Actions → 시트 반영
  */
 
-/** 키워드/표 범위 — 셀 안에 "단어1,단어2"처럼 콤마로 여러 개 가능(Actions에서 나눠 1행 헤더와 매칭) */
-var DEFAULT_KEYWORDS_RANGE = 'AH26:AH31';
+/** 키워드 목록(시트에 실제로 있는 열만). 콤마로 여러 개 한 셀 가능. 열이 좁으면 AH 대신 A 등 */
+var DEFAULT_KEYWORDS_RANGE = 'A26:A31';
 var DEFAULT_TARGET_RANGE = 'A1:U204';
 /** 날짜를 쓰고·빈 행을 찾는 열 (A열이 꽉 차 있고 B열만 비면 'B') */
 var DEFAULT_DATE_COLUMN = 'B';

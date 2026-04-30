@@ -14,9 +14,9 @@ on:
         required: false
         default: '0'
       keywords_range:
-        description: '키워드 목록 범위'
+        description: '키워드 목록 범위(시트 열 수 안; 예 A26:A31)'
         required: false
-        default: 'AH26:AH31'
+        default: 'A26:A31'
       target_range:
         description: '표 범위 (A1 시작 권장)'
         required: false
@@ -121,7 +121,7 @@ jobs:
 
           SPREADSHEET_ID="${SPREADSHEET_ID:-1M0JyzNtz5jQNguET_GksQ9FDtbWqIsfp_GqEXqG1tC0}"
           GID="${GID:-0}"
-          KEYWORDS_RANGE="${KEYWORDS_RANGE:-AH26:AH31}"
+          KEYWORDS_RANGE="${KEYWORDS_RANGE:-A26:A31}"
           TARGET_RANGE="${TARGET_RANGE:-A1:U204}"
           DATE_COLUMN="${DATE_COLUMN:-A}"
           MODE="${MODE:-incremental}"
