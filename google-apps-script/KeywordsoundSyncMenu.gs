@@ -37,6 +37,8 @@
 /** 키워드/표 범위는 시트 구조에 맞게 수정 */
 var DEFAULT_KEYWORDS_RANGE = 'AH26:AH31';
 var DEFAULT_TARGET_RANGE = 'A1:U204';
+/** 날짜를 쓰고·빈 행을 찾는 열 (A열이 꽉 차 있고 B열만 비면 'B') */
+var DEFAULT_DATE_COLUMN = 'B';
 
 /** 스크립트 속성 값 정리 (공백·URL 붙여넣기 실수 방지) */
 function normalizeGithubRepo_(r) {
@@ -190,6 +192,7 @@ function requestKeywordSoundIncrementalSync() {
     gid: gid,
     keywords_range: DEFAULT_KEYWORDS_RANGE,
     target_range: DEFAULT_TARGET_RANGE,
+    date_column: DEFAULT_DATE_COLUMN,
     mode: 'incremental',
     dates: computeTargetDatesKst_(),
   };

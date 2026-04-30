@@ -6,7 +6,7 @@ keywordsound.com 검색량(일별 총검색량) → Google Sheets
   - incremental (기본): KST 기준으로 채울 날짜만 수집하고, 시트는 필요한 셀만 batchUpdate
       · 월요일: 금·토·일 (today-3, today-2, today-1)
       · 그 외 요일: 전일 (today-1)
-      · A열에서 첫 빈 행(2~max_row)부터 새 날짜 행을 쌓음. 이미 같은 날짜 행이 있으면 그 행만 갱신
+      · 날짜 열(--date-column, 기본 A)에서 첫 빈 행(2~max_row)부터 새 날짜 행을 쌓음. 이미 같은 날짜 행이 있으면 그 행만 갱신
   - full: 기존처럼 target_range 전체를 읽어 덮어쓰기(프록시 upload overwrite)
 
 시트 버튼(Apps Script)
@@ -204,6 +204,14 @@ def index_to_col_letters(idx: int) -> str:
     while n:
         n, r = divmod(n - 1, 26)
         s = chr(65 + r) + s
+    return s
+
+
+def normalize_date_column_letter(col: str) -> str:
+    """날짜가 쌓이는 열 (A, B, …). 헤더 매칭 시 이 열은 키워드에서 제외."""
+    s = (col or "A").strip().upper()
+    if not s or not re.match(r"^[A-Z]+$", s):
+        raise ValueError(f"date_column 은 열 문자만 가능합니다 (예: A, B, AA): {col!r}")
     return s
 
 
@@ -437,14 +445,15 @@ def pad_rows(values: list[list[str]], target_len: int) -> list[list[str]]:
     return out
 
 
-def first_empty_row_in_column_a(
+def first_empty_row_in_column(
     col_values: list[list[str]],
     *,
     sheet_start_row: int,
     expected_rows: int,
+    column_letter: str,
 ) -> int:
     """
-    col_values: A{sheet_start_row}:A{sheet_start_row+expected_rows-1} 에 해당하는 2차원 배열(행 단위)
+    col_values: {column_letter}{sheet_start_row}:… 한 열 구간의 2차원 배열(행마다 길이 1)
     반환: 시트 상 1-based 행 번호 중 첫 빈 칸
     """
     col_values = pad_rows(col_values, expected_rows)
@@ -453,8 +462,8 @@ def first_empty_row_in_column_a(
         if not str(cell).strip():
             return sheet_start_row + i
     raise RuntimeError(
-        f"A열 {sheet_start_row}~{sheet_start_row + expected_rows - 1} 에 빈 행이 없습니다. "
-        "행을 늘리거나 target 범위를 조정하세요."
+        f"{column_letter}열 {sheet_start_row}~{sheet_start_row + expected_rows - 1} 에 빈 행이 없습니다. "
+        "행을 늘리거나 target 범위·--date-column 을 조정하세요."
     )
 
 
@@ -466,6 +475,7 @@ def run_incremental_google(
     target_dates: list[str],
     keywords_range: str,
     target_range: str,
+    date_column: str,
     scraper: KeywordSoundScraper,
     dry_run: bool,
 ) -> None:
@@ -477,34 +487,43 @@ def run_incremental_google(
     if r1 != 1 or c1 != 0:
         raise RuntimeError("incremental 모드는 target_range 가 A1 시작(A1:U204 형태)일 것을 권장합니다.")
 
+    dc_letter = normalize_date_column_letter(date_column)
+    dc_idx = col_letters_to_index(dc_letter)
+    if dc_idx < c1 or dc_idx > c2:
+        raise RuntimeError(
+            f"date_column={dc_letter} 이 target_range 열 범위 안에 있어야 합니다. target_range={target_range}"
+        )
+
     max_row = r2
     max_col_letter = index_to_col_letters(c2)
-    n_body_rows = max_row - 1  # A2:Amax
+    n_body_rows = max_row - 1  # body rows 2..max_row
 
     header_rng = a1_range(worksheet, f"A1:{max_col_letter}1")
-    col_a_rng = a1_range(worksheet, f"A2:A{max_row}")
+    col_date_rng = a1_range(worksheet, f"{dc_letter}2:{dc_letter}{max_row}")
 
     header_rows = sheets.get_values(spreadsheet_id, header_rng)
     header = header_rows[0] if header_rows else []
     header_norm = [normalize_keyword(x) for x in header]
     kw_to_col: Dict[str, int] = {}
     for i, h in enumerate(header_norm):
-        if i == 0:
+        if i == dc_idx:
             continue
         if h:
             kw_to_col[h] = i
 
-    col_a = sheets.get_values(spreadsheet_id, col_a_rng)
-    col_a = pad_rows(col_a, n_body_rows)
+    col_dates = sheets.get_values(spreadsheet_id, col_date_rng)
+    col_dates = pad_rows(col_dates, n_body_rows)
 
     date_to_row: Dict[str, int] = {}
     for i in range(n_body_rows):
-        v = col_a[i][0] if col_a[i] else ""
+        v = col_dates[i][0] if col_dates[i] else ""
         ds = str(v).strip()
         if _DATE_RE.match(ds):
             date_to_row[ds] = i + 2  # sheet row
 
-    first_empty = first_empty_row_in_column_a(col_a, sheet_start_row=2, expected_rows=n_body_rows)
+    first_empty = first_empty_row_in_column(
+        col_dates, sheet_start_row=2, expected_rows=n_body_rows, column_letter=dc_letter
+    )
     append_cursor = first_empty
 
     want = set(target_dates)
@@ -535,11 +554,13 @@ def run_incremental_google(
                     raise RuntimeError(f"행 부족: {d} 를 쓸 행이 {max_row} 을 초과합니다.")
                 date_to_row[d] = row
                 pending_new_dates.discard(d)
-                updates.append((a1_range(worksheet, f"A{row}"), [[d]]))
+                updates.append((a1_range(worksheet, f"{dc_letter}{row}"), [[d]]))
             updates.append((a1_range(worksheet, f"{col_letter}{row}"), [[total]]))
 
     if pending_new_dates:
-        print(f"\n[경고] keywordsound 에서 찾지 못해 새 행(A열)을 만들지 못한 날짜: {sorted(pending_new_dates)}")
+        print(
+            f"\n[경고] keywordsound 에서 찾지 못해 새 행({dc_letter}열)을 만들지 못한 날짜: {sorted(pending_new_dates)}"
+        )
 
     if dry_run:
         print(f"\n[dry-run] 쓰기 스킵. updates={len(updates)} 블록")
@@ -563,6 +584,7 @@ def run_incremental_proxy(
     target_dates: list[str],
     keywords_range: str,
     target_range: str,
+    date_column: str,
     scraper: KeywordSoundScraper,
     dry_run: bool,
 ) -> None:
@@ -570,6 +592,13 @@ def run_incremental_proxy(
     r1, c1, r2, c2 = parse_a1_range(target_range)
     if r1 != 1 or c1 != 0:
         raise RuntimeError("proxy incremental 은 A1 시작 범위를 권장합니다.")
+    dc_letter = normalize_date_column_letter(date_column)
+    dc_idx = col_letters_to_index(dc_letter)
+    if dc_idx < c1 or dc_idx > c2:
+        raise RuntimeError(
+            f"date_column={dc_letter} 이 target_range 열 범위 안에 있어야 합니다. target_range={target_range}"
+        )
+
     max_row = r2
     max_col_letter = index_to_col_letters(c2)
     n_body_rows = max_row - 1
@@ -585,22 +614,28 @@ def run_incremental_proxy(
     header_norm = [normalize_keyword(x) for x in header]
     kw_to_col: Dict[str, int] = {}
     for i, h in enumerate(header_norm):
-        if i == 0:
+        if i == dc_idx:
             continue
         if h:
             kw_to_col[h] = i
 
-    col_a = [grid[r][:1] for r in range(1, max_row)]
-    col_a = pad_rows(col_a, n_body_rows)
+    col_dates = []
+    for r in range(1, max_row):
+        row = grid[r] if r < len(grid) else []
+        cell = row[dc_idx] if len(row) > dc_idx else ""
+        col_dates.append([cell])
+    col_dates = pad_rows(col_dates, n_body_rows)
 
     date_to_row: Dict[str, int] = {}
     for i in range(n_body_rows):
-        cell = col_a[i][0] if col_a[i] else ""
+        cell = col_dates[i][0] if col_dates[i] else ""
         ds = str(cell).strip()
         if _DATE_RE.match(ds):
             date_to_row[ds] = i + 2
 
-    first_empty = first_empty_row_in_column_a(col_a, sheet_start_row=2, expected_rows=n_body_rows)
+    first_empty = first_empty_row_in_column(
+        col_dates, sheet_start_row=2, expected_rows=n_body_rows, column_letter=dc_letter
+    )
     append_cursor = first_empty
     want = set(target_dates)
     pending_new_dates = {d for d in want if d not in date_to_row}
@@ -632,7 +667,9 @@ def run_incremental_proxy(
                     grid.append([])
                 while len(grid[row - 1]) <= c2:
                     grid[row - 1].append("")
-                grid[row - 1][0] = d
+                while len(grid[row - 1]) <= dc_idx:
+                    grid[row - 1].append("")
+                grid[row - 1][dc_idx] = d
             r = row - 1
             while len(grid[r]) <= col_idx:
                 grid[r].append("")
@@ -640,7 +677,9 @@ def run_incremental_proxy(
             touched += 1
 
     if pending_new_dates:
-        print(f"\n[경고] 데이터가 없어 새 행(A열)을 만들지 못한 날짜: {sorted(pending_new_dates)}")
+        print(
+            f"\n[경고] 데이터가 없어 새 행({dc_letter}열)을 만들지 못한 날짜: {sorted(pending_new_dates)}"
+        )
 
     if dry_run:
         print(f"\n[dry-run] proxy overwrite 스킵. touched_cells~={touched}")
@@ -791,6 +830,11 @@ def main() -> None:
     ap.add_argument("--worksheet", default=None)
     ap.add_argument("--keywords-range", default="AH26:AH31")
     ap.add_argument("--target-range", default="A1:U204")
+    ap.add_argument(
+        "--date-column",
+        default="A",
+        help="날짜가 있는 열 (빈 행 탐색·신규 날짜 기록). 예: A 또는 B",
+    )
     ap.add_argument("--mode", choices=("incremental", "full"), default="incremental")
     ap.add_argument(
         "--dates",
@@ -833,6 +877,8 @@ def main() -> None:
             args.keywords_range = payload["keywords_range"]
         if payload.get("target_range"):
             args.target_range = payload["target_range"]
+        if payload.get("date_column"):
+            args.date_column = str(payload["date_column"]).strip()
         if payload.get("mode"):
             args.mode = str(payload["mode"])
         if payload.get("dates"):
@@ -913,6 +959,7 @@ def main() -> None:
                 target_dates=target_dates,
                 keywords_range=args.keywords_range,
                 target_range=args.target_range,
+                date_column=args.date_column,
                 scraper=scraper,
                 dry_run=args.dry_run,
             )
@@ -930,6 +977,7 @@ def main() -> None:
                 target_dates=target_dates,
                 keywords_range=args.keywords_range,
                 target_range=args.target_range,
+                date_column=args.date_column,
                 scraper=scraper,
                 dry_run=args.dry_run,
             )

@@ -21,6 +21,10 @@ on:
         description: '표 범위 (A1 시작 권장)'
         required: false
         default: 'A1:U204'
+      date_column:
+        description: '날짜·첫 빈 행 기준 열 (A, B 등 — target_range 안)'
+        required: false
+        default: 'A'
       mode:
         description: 'incremental(기본) | full'
         required: false
@@ -109,12 +113,14 @@ jobs:
           GID="${{ github.event.inputs.gid }}"
           KEYWORDS_RANGE="${{ github.event.inputs.keywords_range }}"
           TARGET_RANGE="${{ github.event.inputs.target_range }}"
+          DATE_COLUMN="${{ github.event.inputs.date_column }}"
           MODE="${{ github.event.inputs.mode }}"
 
           SPREADSHEET_ID="${SPREADSHEET_ID:-1M0JyzNtz5jQNguET_GksQ9FDtbWqIsfp_GqEXqG1tC0}"
           GID="${GID:-0}"
           KEYWORDS_RANGE="${KEYWORDS_RANGE:-AH26:AH31}"
           TARGET_RANGE="${TARGET_RANGE:-A1:U204}"
+          DATE_COLUMN="${DATE_COLUMN:-A}"
           MODE="${MODE:-incremental}"
 
           if [[ "${GITHUB_EVENT_NAME}" == "repository_dispatch" ]]; then
@@ -129,5 +135,6 @@ jobs:
               --gid "$GID" \
               --keywords-range "$KEYWORDS_RANGE" \
               --target-range "$TARGET_RANGE" \
+              --date-column "$DATE_COLUMN" \
               --mode "$MODE"
           fi
