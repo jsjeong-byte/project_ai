@@ -103,6 +103,8 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}
           PYTHONUNBUFFERED: "1"
+          # keywordsound.com DataTables 가 느릴 때(기본 스크립트 240초, 여기서 상한 여유)
+          KEYWORDSOUND_DATATABLES_TIMEOUT_SEC: "300"
         run: |
           set -euxo pipefail
           if ! command -v jq >/dev/null 2>&1; then

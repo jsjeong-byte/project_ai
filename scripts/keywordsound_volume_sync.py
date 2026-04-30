@@ -287,12 +287,28 @@ def build_sheets_client():
         ) from None
 
 
+def resolve_keywordsound_datatables_timeout_sec(explicit: Optional[int] = None) -> int:
+    """
+    keywordsound.com DataTables 가 느릴 때 대기(초).
+    --keywordsound-timeout 이 있으면 우선, 없으면 KEYWORDSOUND_DATATABLES_TIMEOUT_SEC, 기본 240.
+    """
+    if explicit is not None:
+        return max(60, min(int(explicit), 900))
+    raw = (os.environ.get("KEYWORDSOUND_DATATABLES_TIMEOUT_SEC") or "").strip()
+    if raw:
+        try:
+            return max(60, min(int(raw), 900))
+        except ValueError:
+            pass
+    return 240
+
+
 class KeywordSoundScraper:
-    def __init__(self, headless: bool = True, timeout_sec: int = 120):
+    def __init__(self, headless: bool = True, timeout_sec: Optional[int] = None):
         self.headless = headless
-        self.timeout_sec = timeout_sec
+        self.timeout_sec = resolve_keywordsound_datatables_timeout_sec(timeout_sec)
         self.driver = self._new_driver()
-        self.wait = WebDriverWait(self.driver, timeout_sec)
+        self.wait = WebDriverWait(self.driver, self.timeout_sec)
 
     def close(self) -> None:
         try:
@@ -355,7 +371,12 @@ class KeywordSoundScraper:
             if isinstance(info, dict) and int(info.get("recordsDisplay") or 0) > 0:
                 return
             if (time.time() - t0) > max(self.timeout_sec, 90):
-                raise RuntimeError("검색량 테이블(DataTables) 로딩 타임아웃")
+                raise RuntimeError(
+                    "검색량 테이블(DataTables) 로딩 타임아웃 "
+                    f"({self.timeout_sec}초). 사이트가 느리면 GitHub Actions 환경변수 "
+                    "KEYWORDSOUND_DATATABLES_TIMEOUT_SEC=300 처럼 늘리거나, "
+                    "--keywordsound-timeout 300 으로 실행하세요."
+                )
             time.sleep(0.25)
 
     def fetch_totals_for_dates(self, keyword: str, want_dates: set[str]) -> Dict[str, int]:
@@ -849,6 +870,12 @@ def main() -> None:
         help="incremental 시: google=batch 부분 쓰기, proxy=범위 읽고 overwrite",
     )
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--keywordsound-timeout",
+        type=int,
+        default=None,
+        help="keywordsound DataTables 대기 초 (60~900, 기본: 환경변수 또는 240)",
+    )
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--no-headless", action="store_true")
     ap.add_argument(
@@ -884,6 +911,8 @@ def main() -> None:
         if payload.get("dates"):
             dl = payload["dates"]
             args.dates = ",".join(str(x) for x in dl) if isinstance(dl, list) else str(dl)
+        if payload.get("keywordsound_timeout") is not None:
+            args.keywordsound_timeout = int(payload["keywordsound_timeout"])
 
     sid = (args.spreadsheet_id or "").strip()
     if not sid:
@@ -933,7 +962,7 @@ def main() -> None:
         except Exception:
             write_backend = "proxy"
 
-    scraper = KeywordSoundScraper(headless=headless)
+    scraper = KeywordSoundScraper(headless=headless, timeout_sec=args.keywordsound_timeout)
     try:
         if args.mode == "full":
             if not api_key:
