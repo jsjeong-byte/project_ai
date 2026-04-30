@@ -17,6 +17,7 @@ keywordsound.com 검색량(일별 총검색량) → Google Sheets
   - incremental + Google 쓰기: GOOGLE_SERVICE_ACCOUNT_JSON 또는 SERVICE_ACCOUNT_JSON 경로
       (또는 .credentials/cost_report_config.txt 의 SERVICE_ACCOUNT_JSON)
   - 키워드/시트 읽기(옵션): PROXY_API_KEY + /api/sheets/read
+  - keywords_range 셀: 행마다 하나씩 또는 한 셀에 "a,b,c"(콤마)로 여러 키워드 → 각각 수집·1행 헤더와 매칭
   - full + 프록시만: PROXY_API_KEY + upload
 
 주의: 서비스 계정 이메일에 스프레드시트 편집 권한이 있어야 합니다.
@@ -57,6 +58,8 @@ PROXY_BASE = "https://api-auth.madup-dct.site"
 KST = ZoneInfo("Asia/Seoul")
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# 키워드 범위 셀 안에서 "a,b,c" / "a，c"(전각 콤마) 등으로 여러 개 넣을 때
+_KEYWORD_SPLIT_RE = re.compile(r"[,\uFF0C\u3001]+")  # ASCII / 전각 콤마 / 顿号
 
 
 def _is_google_sheets_http_403(exc: BaseException) -> bool:
@@ -185,6 +188,26 @@ def parse_int_maybe(num: str) -> Optional[int]:
 
 def normalize_keyword(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip())
+
+
+def expand_keywords_from_sheet_cells(rows: list[list[str]]) -> list[str]:
+    """
+    keywords_range 각 행의 첫 셀을 읽고, 콤마(반각/전각)·顿号 로 구분된 키워드를 펼칩니다.
+    표 1행 헤더와 매칭하려면 펼친 각 문자열이 헤더와 같아야 합니다.
+    """
+    out: list[str] = []
+    for r in rows:
+        if not r:
+            continue
+        cell = str(r[0] if r[0] is not None else "").strip()
+        if not cell:
+            continue
+        for part in _KEYWORD_SPLIT_RE.split(cell):
+            k = normalize_keyword(part)
+            if k:
+                out.append(k)
+    seen: set[str] = set()
+    return [k for k in out if not (k in seen or seen.add(k))]
 
 
 def col_letters_to_index(col: str) -> int:
@@ -865,9 +888,13 @@ def load_keywords(
                 "동작하는 PROXY_API_KEY 가 필요합니다."
             ) from e
         rows = sheets_read(api_key, spreadsheet_id, worksheet, keywords_range)
-    keywords = [normalize_keyword(r[0]) for r in rows if r and normalize_keyword(r[0])]
-    seen: set[str] = set()
-    return [k for k in keywords if not (k in seen or seen.add(k))]
+    keywords = expand_keywords_from_sheet_cells(rows)
+    if not keywords:
+        raise RuntimeError(
+            f"키워드 범위 {keywords_range!r} 에서 읽은 값이 비었습니다. "
+            "한 셀에 '키워드1,키워드2'처럼 넣거나 행마다 하나씩 넣을 수 있습니다."
+        )
+    return keywords
 
 
 def resolve_worksheet_title(api_key: Optional[str], spreadsheet_id: str, gid: Optional[int], worksheet: Optional[str]) -> str:
