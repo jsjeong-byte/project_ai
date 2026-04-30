@@ -323,7 +323,7 @@ def resolve_keywordsound_datatables_timeout_sec(explicit: Optional[int] = None) 
             return max(60, min(int(raw), 900))
         except ValueError:
             pass
-    return 240
+    return 300
 
 
 class KeywordSoundScraper:
@@ -376,7 +376,7 @@ class KeywordSoundScraper:
         except Exception:
             pass
 
-    def _wait_datatables_ready(self) -> None:
+    def _wait_datatables_ready_once(self) -> None:
         t0 = time.time()
         while True:
             info = self.driver.execute_script(
@@ -396,11 +396,30 @@ class KeywordSoundScraper:
             if (time.time() - t0) > max(self.timeout_sec, 90):
                 raise RuntimeError(
                     "검색량 테이블(DataTables) 로딩 타임아웃 "
-                    f"({self.timeout_sec}초). 사이트가 느리면 GitHub Actions 환경변수 "
-                    "KEYWORDSOUND_DATATABLES_TIMEOUT_SEC=300 처럼 늘리거나, "
-                    "--keywordsound-timeout 300 으로 실행하세요."
+                    f"({self.timeout_sec}초). GitHub Actions 변수 "
+                    "KEYWORDSOUND_DATATABLES_TIMEOUT_SEC=600 또는 "
+                    "--keywordsound-timeout 600 으로 늘리세요. (최대 900초)"
                 )
             time.sleep(0.25)
+
+    def _wait_datatables_ready(self) -> None:
+        """타임아웃 시 1회 새로고침 후 동일 대기 재시도 (헤드리스에서 간헐적 공백 완화)."""
+        try:
+            self._wait_datatables_ready_once()
+        except RuntimeError as e:
+            if "타임아웃" not in str(e):
+                raise
+            time.sleep(2)
+            try:
+                self.driver.refresh()
+                self._hide_ad_overlays()
+                self.wait.until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "table#tableSearchVolume tbody"))
+                )
+                self._hide_ad_overlays()
+            except Exception:
+                raise e
+            self._wait_datatables_ready_once()
 
     def fetch_totals_for_dates(self, keyword: str, want_dates: set[str]) -> Dict[str, int]:
         """want_dates 에 해당하는 날짜만 추출 (DataTables 전체 직렬화 없이 JS에서 필터)."""
@@ -613,6 +632,8 @@ def run_incremental_google(
                 pending_new_dates.discard(d)
                 updates.append((a1_range(worksheet, f"{dc_letter}{row}"), [[d]]))
             updates.append((a1_range(worksheet, f"{col_letter}{row}"), [[total]]))
+        if len(keywords) > 1:
+            time.sleep(1.5)
 
     if pending_new_dates:
         print(
@@ -762,6 +783,8 @@ def run_incremental_proxy(
                 grid[r].append("")
             grid[r][col_idx] = str(total)
             touched += 1
+        if len(keywords) > 1:
+            time.sleep(1.5)
 
     if pending_new_dates:
         print(
@@ -1033,6 +1056,11 @@ def main() -> None:
         raise RuntimeError("키워드가 비었습니다.")
     print(f"[KST 기준일] {datetime.now(tz=KST).date().isoformat()} | target_dates={target_dates}")
     print(f"[키워드] {keywords}")
+    _tmo = resolve_keywordsound_datatables_timeout_sec(args.keywordsound_timeout)
+    print(
+        f"[안내] 키워드 {len(keywords)}개 순차 수집. 사이트가 느리면 키워드당 최대 ~{_tmo}s "
+        f"(타임아웃 시 1회 새로고침 후 재시도)까지 걸릴 수 있습니다."
+    )
 
     write_backend = args.write_backend
     if write_backend == "auto":
