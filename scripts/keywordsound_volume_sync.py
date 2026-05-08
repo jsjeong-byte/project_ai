@@ -17,7 +17,8 @@ keywordsound.com 검색량(일별 총검색량) → Google Sheets
   - incremental + Google 쓰기: GOOGLE_SERVICE_ACCOUNT_JSON 또는 SERVICE_ACCOUNT_JSON 경로
       (또는 .credentials/cost_report_config.txt 의 SERVICE_ACCOUNT_JSON)
   - 키워드/시트 읽기(옵션): PROXY_API_KEY + /api/sheets/read
-  - keywords_range 셀: 행마다 하나씩 또는 한 셀에 "a,b,c"(콤마)로 여러 키워드 → 각각 수집·1행 헤더와 매칭
+  - keywords_range: ROW1(또는 비움)이면 target_range 1행(날짜 열 제외)을 키워드로 사용.
+    그 외 범위는 행마다 하나씩 또는 "a,b,c"(콤마)로 여러 키워드 → 수집·1행 헤더와 매칭
   - full + 프록시만: PROXY_API_KEY + upload
 
 주의: 서비스 계정 이메일에 스프레드시트 편집 권한이 있어야 합니다.
@@ -253,6 +254,17 @@ def normalize_date_column_letter(col: str) -> str:
     if not s or not re.match(r"^[A-Z]+$", s):
         raise ValueError(f"date_column 은 열 문자만 가능합니다 (예: A, B, AA): {col!r}")
     return s
+
+
+def single_column_letter_from_range(rng: str) -> Optional[str]:
+    """'A26:A31' → 'A'. 두 모서리 열이 다르면 None."""
+    try:
+        _, c1, _, c2 = parse_a1_range(rng)
+    except ValueError:
+        return None
+    if c1 != c2:
+        return None
+    return index_to_col_letters(c1)
 
 
 def parse_a1_range(rng: str) -> tuple[int, int, int, int]:
@@ -615,6 +627,14 @@ def run_incremental_google(
     pending_new_dates = {d for d in want if d not in date_to_row}
     updates: List[Tuple[str, List[List[Any]]]] = []
 
+    # 설정 방어: 키워드를 날짜로 잘못 읽어온 경우 즉시 중단
+    _sanity_check_keywords_not_dates(
+        keywords=keywords,
+        keywords_range=keywords_range,
+        target_range=target_range,
+        date_column=dc_letter,
+    )
+
     n_header_skipped = 0
     n_kw_header_ok = 0
     n_kw_any_numeric = 0
@@ -673,7 +693,7 @@ def run_incremental_google(
         ]
         if n_header_skipped == len(keywords):
             lines.append(
-                "→ AH… 등 키워드 셀 값과 표 1행 제목이 정확히 같은지 확인하세요. "
+                "→ 수집 대상 키워드와 표 1행 제목이 정확히 같은지 확인하세요. "
                 f"날짜 열({dc_letter})은 키워드 후보에서 제외됩니다."
             )
         elif n_kw_any_numeric == 0:
@@ -762,6 +782,13 @@ def run_incremental_proxy(
     n_kw_header_ok = 0
     n_kw_any_numeric = 0
 
+    _sanity_check_keywords_not_dates(
+        keywords=keywords,
+        keywords_range=keywords_range,
+        target_range=target_range,
+        date_column=dc_letter,
+    )
+
     for kw in keywords:
         print(f"\n[수집] {kw}")
         got = scraper.fetch_totals_for_dates(kw, want)
@@ -820,7 +847,7 @@ def run_incremental_proxy(
             f"헤더 스킵: {n_header_skipped}/{len(keywords)} | keywordsound에 값 있음: {n_kw_any_numeric}키워드",
         ]
         if n_header_skipped == len(keywords):
-            lines.append("→ 1행 제목과 키워드 목록(AH…) 문자열이 같은지 확인하세요.")
+            lines.append("→ 1행 제목과 수집 대상 키워드 문자열이 같은지 확인하세요.")
         elif n_kw_any_numeric == 0:
             lines.append("→ keywordsound가 요청 날짜에 데이터를 주지 않았습니다.")
         raise RuntimeError("\n".join(lines))
@@ -894,38 +921,42 @@ def run_full_proxy(
     print(f"[완료] {len(all_updates)} 셀")
 
 
-def load_keywords(
-    *,
+def _keywords_source_is_header_row(keywords_range: str) -> bool:
+    s = (keywords_range or "").strip().upper()
+    return not s or s in ("ROW1", "HEADER", "R1")
+
+
+def _read_sheet_values(
     spreadsheet_id: str,
     worksheet: str,
-    keywords_range: str,
+    cell_range: str,
     api_key: Optional[str],
-) -> list[str]:
+    *,
+    range_label: str,
+) -> list[list[str]]:
+    """Sheets API 우선, 실패 시(403 제외) 프록시."""
     from src.creative_tagging.sheets_client import a1_range
 
     rows: list[list[str]]
-    # PROXY 와 Google 둘 다 있으면 예전엔 프록시를 먼저 써서 502 등에 막힘 → Sheets API 우선
     try:
         sheets = build_sheets_client()
         try:
-            rows = sheets.get_values(spreadsheet_id, a1_range(worksheet, keywords_range))
+            rows = sheets.get_values(spreadsheet_id, a1_range(worksheet, cell_range))
         except Exception as ge:
             if _is_range_exceeds_grid_error(ge):
                 raise RuntimeError(
-                    f"키워드 범위 {keywords_range!r} 가 이 시트의 실제 열·행 범위를 넘습니다. "
-                    "구글 시트에 있는 열까지만 지정하세요. "
-                    "(예: 시트가 열 33개면 마지막은 AG이고, AH는 없습니다. "
-                    "Apps Script 상단 `DEFAULT_KEYWORDS_RANGE` 를 `A26:A31` 같이 좁은 범위로 바꾸세요.)"
+                    f"{range_label} 범위 {cell_range!r} 가 이 시트의 실제 열·행 범위를 넘습니다. "
+                    "구글 시트에 있는 열·행까지만 지정하세요."
                 ) from ge
             if _is_google_sheets_http_403(ge):
-                raise RuntimeError(_sheets_403_message(spreadsheet_id=spreadsheet_id, what="키워드 범위 읽기")) from ge
+                raise RuntimeError(_sheets_403_message(spreadsheet_id=spreadsheet_id, what=f"{range_label} 읽기")) from ge
             raise
     except RuntimeError:
         raise
     except Exception as e:
         if _google_sa_json_configured():
             raise RuntimeError(
-                "Google Sheets 로 키워드 범위를 읽지 못했습니다. "
+                f"Google Sheets 로 {range_label} 를 읽지 못했습니다. "
                 "GOOGLE_SERVICE_ACCOUNT_JSON 이 설정되어 있어 프록시(api-auth.madup-dct.site)로는 넘기지 않습니다(502 등).\n"
                 "· JSON 의 client_email 을 이 스프레드시트에「편집자」로 공유했는지 확인\n"
                 "· 시트 URL 의 ID 와 실행 중인 spreadsheet_id 가 같은지 확인\n"
@@ -935,18 +966,132 @@ def load_keywords(
             ) from e
         if not api_key:
             raise RuntimeError(
-                "시트에서 키워드를 읽을 수 없습니다. "
+                "시트에서 값을 읽을 수 없습니다. "
                 "GitHub Secret GOOGLE_SERVICE_ACCOUNT_JSON(권장) 또는 "
                 "동작하는 PROXY_API_KEY 가 필요합니다."
             ) from e
-        rows = sheets_read(api_key, spreadsheet_id, worksheet, keywords_range)
+        rows = sheets_read(api_key, spreadsheet_id, worksheet, cell_range)
+    return rows
+
+
+def load_keywords_from_header_row(
+    *,
+    spreadsheet_id: str,
+    worksheet: str,
+    target_range: str,
+    date_column: str,
+    api_key: Optional[str],
+) -> list[str]:
+    """target_range 의 1행에서 date_column 을 제외한 나머지 셀을 키워드로 (incremental 헤더 매칭과 동일 규칙)."""
+    r1, c1, r2, c2 = parse_a1_range(target_range)
+    if r1 != 1 or c1 != 0:
+        raise RuntimeError(
+            "1행에서 키워드를 쓰려면 target_range 가 A1부터 시작해야 합니다 (예: A1:U204)."
+        )
+    dc_idx = col_letters_to_index(normalize_date_column_letter(date_column))
+    if dc_idx < c1 or dc_idx > c2:
+        raise RuntimeError(
+            f"date_column 이 target_range 헤더 열 안에 있어야 합니다. "
+            f"date_column={date_column!r}, target_range={target_range!r}"
+        )
+    max_col_letter = index_to_col_letters(c2)
+    cell_range = f"A1:{max_col_letter}1"
+    rows = _read_sheet_values(
+        spreadsheet_id,
+        worksheet,
+        cell_range,
+        api_key,
+        range_label="표 1행(키워드)",
+    )
+    header = list(rows[0]) if rows and rows[0] else []
+    while len(header) <= c2:
+        header.append("")
+    out: list[str] = []
+    seen: set[str] = set()
+    for i in range(c1, c2 + 1):
+        if i == dc_idx:
+            continue
+        cell = str(header[i] if i < len(header) else "").strip()
+        k = normalize_keyword(cell)
+        if k and not (k in seen or seen.add(k)):
+            out.append(k)
+    if not out:
+        raise RuntimeError(
+            "1행에서 가져온 키워드가 없습니다. "
+            f"date_column({date_column}) 제외한 칸에 키워드 제목을 넣었는지 확인하세요."
+        )
+    return out
+
+
+def load_keywords(
+    *,
+    spreadsheet_id: str,
+    worksheet: str,
+    keywords_range: str,
+    target_range: str,
+    date_column: str,
+    api_key: Optional[str],
+) -> list[str]:
+    if _keywords_source_is_header_row(keywords_range):
+        return load_keywords_from_header_row(
+            spreadsheet_id=spreadsheet_id,
+            worksheet=worksheet,
+            target_range=target_range,
+            date_column=date_column,
+            api_key=api_key,
+        )
+    kr = keywords_range.strip()
+    sc = single_column_letter_from_range(kr)
+    if sc is not None and sc == normalize_date_column_letter(date_column):
+        raise RuntimeError(
+            f"keywords_range {kr!r} 와 date_column {date_column!r} 가 같은 열입니다. "
+            "이 열에는 날짜가 들어가므로 키워드 목록으로 쓸 수 없습니다. "
+            "브랜드·검색어는 표 1행에 두고 `--keywords-range ROW1`(기본)으로 실행하거나, "
+            "키워드만 적어 둔 다른 열 범위를 지정하세요."
+        )
+    rows = _read_sheet_values(
+        spreadsheet_id,
+        worksheet,
+        kr,
+        api_key,
+        range_label="키워드 범위",
+    )
     keywords = expand_keywords_from_sheet_cells(rows)
     if not keywords:
         raise RuntimeError(
             f"키워드 범위 {keywords_range!r} 에서 읽은 값이 비었습니다. "
             "한 셀에 '키워드1,키워드2'처럼 넣거나 행마다 하나씩 넣을 수 있습니다."
         )
+    if all(_DATE_RE.match(k) for k in keywords):
+        raise RuntimeError(
+            f"키워드 범위 {kr!r} 에서 읽은 값이 모두 YYYY-MM-DD 형태입니다. "
+            "세로로 쌓인 날짜 열을 키워드 범위로 지정한 경우가 많습니다. "
+            "표 1행의 검색어 제목을 쓰려면 `--keywords-range ROW1`(기본)을 쓰고, "
+            "날짜는 --date-column 과 다른 열에 두세요."
+        )
     return keywords
+
+
+def _sanity_check_keywords_not_dates(
+    *, keywords: list[str], keywords_range: str, target_range: str, date_column: str
+) -> None:
+    """
+    설정 실수 방지:
+      - keywords 가 전부 YYYY-MM-DD 이면, 키워드가 아니라 날짜 열을 읽은 경우가 거의 확실.
+    (load_keywords 에서도 체크하지만, dispatch/변형 경로에서 누락될 수 있어 2차 방어)
+    """
+    if keywords and all(_DATE_RE.match(str(k)) for k in keywords):
+        raise RuntimeError(
+            "키워드 목록이 전부 날짜(YYYY-MM-DD)로 보입니다. "
+            "키워드 범위를 날짜 열로 잘못 지정했을 가능성이 큽니다.\n"
+            f"  keywords_range={keywords_range!r}\n"
+            f"  target_range={target_range!r}\n"
+            f"  date_column={date_column!r}\n"
+            f"  keywords(일부)={keywords[:10]!r}\n"
+            "해결:\n"
+            "  - 키워드를 1행 헤더(B1~U1 등)에 두는 방식이면: --keywords-range ROW1\n"
+            "  - date_column 은 날짜가 실제로 적히는 열(A 등)로 맞추세요."
+        )
 
 
 def resolve_worksheet_title(api_key: Optional[str], spreadsheet_id: str, gid: Optional[int], worksheet: Optional[str]) -> str:
@@ -983,8 +1128,8 @@ def main() -> None:
     ap.add_argument("--worksheet", default=None)
     ap.add_argument(
         "--keywords-range",
-        default="A26:A31",
-        help="키워드 목록 범위(시트 실제 열 안). 넓은 표만 쓰면 AH 등으로 변경",
+        default="ROW1",
+        help="ROW1·비움·HEADER: target_range 1행(날짜 열 제외)을 키워드로. 그 외: 별도 A1 범위",
     )
     ap.add_argument("--target-range", default="A1:U204")
     ap.add_argument(
@@ -1036,8 +1181,10 @@ def main() -> None:
             args.gid = int(payload["gid"])
         if payload.get("worksheet"):
             args.worksheet = payload["worksheet"]
-        if payload.get("keywords_range"):
-            args.keywords_range = payload["keywords_range"]
+        if "keywords_range" in payload:
+            kr = payload.get("keywords_range")
+            if kr is not None and str(kr).strip():
+                args.keywords_range = str(kr).strip()
         if payload.get("target_range"):
             args.target_range = payload["target_range"]
         if payload.get("date_column"):
@@ -1049,6 +1196,17 @@ def main() -> None:
             args.dates = ",".join(str(x) for x in dl) if isinstance(dl, list) else str(dl)
         if payload.get("keywordsound_timeout") is not None:
             args.keywordsound_timeout = int(payload["keywordsound_timeout"])
+
+    # 실행 파라미터를 항상 로그로 남겨, ROW1/B1~U1 전환 시 혼선을 줄임
+    print(
+        "[실행 파라미터]\n"
+        f"  spreadsheet_id={args.spreadsheet_id!r}\n"
+        f"  gid={args.gid!r} worksheet={args.worksheet!r}\n"
+        f"  mode={args.mode!r} write_backend={args.write_backend!r}\n"
+        f"  target_range={args.target_range!r}\n"
+        f"  keywords_range={args.keywords_range!r}\n"
+        f"  date_column={args.date_column!r}\n"
+    )
 
     sid = (args.spreadsheet_id or "").strip()
     if not sid:
@@ -1083,6 +1241,8 @@ def main() -> None:
         spreadsheet_id=args.spreadsheet_id,
         worksheet=worksheet,
         keywords_range=args.keywords_range,
+        target_range=args.target_range,
+        date_column=args.date_column,
         api_key=api_key,
     )
     if not keywords:

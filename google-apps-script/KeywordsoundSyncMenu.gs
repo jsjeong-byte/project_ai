@@ -34,11 +34,12 @@
  * 동작: repository_dispatch (keywordsound-sync) → GitHub Actions → 시트 반영
  */
 
-/** 키워드 목록(시트에 실제로 있는 열만). 콤마로 여러 개 한 셀 가능. 열이 좁으면 AH 대신 A 등 */
-var DEFAULT_KEYWORDS_RANGE = 'A26:A31';
+/** 표 범위. 키워드는 기본적으로 이 범위의 1행(날짜 열 제외)에서 읽습니다(워크플로 ROW1). */
 var DEFAULT_TARGET_RANGE = 'A1:U204';
 /** 날짜를 쓰고·빈 행을 찾는 열 (A열이 꽉 차 있고 B열만 비면 'B') */
-var DEFAULT_DATE_COLUMN = 'B';
+// 키워드는 ROW1 + date_column 제외 규칙을 사용합니다.
+// date_column='A' 이면 키워드 헤더는 자연스럽게 B1~U1 이 됩니다.
+var DEFAULT_DATE_COLUMN = 'A';
 
 /** 스크립트 속성 값 정리 (공백·URL 붙여넣기 실수 방지) */
 function normalizeGithubRepo_(r) {
@@ -190,7 +191,7 @@ function requestKeywordSoundIncrementalSync() {
   var payload = {
     spreadsheet_id: ss.getId(),
     gid: gid,
-    keywords_range: DEFAULT_KEYWORDS_RANGE,
+    keywords_range: 'ROW1',
     target_range: DEFAULT_TARGET_RANGE,
     date_column: DEFAULT_DATE_COLUMN,
     mode: 'incremental',
