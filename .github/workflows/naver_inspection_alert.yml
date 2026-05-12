@@ -78,27 +78,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Slack 테스트 메시지 (계정 B)
-        run: |
-          python - <<'PYEOF'
-          import os, json, urllib.request
-          webhook = os.environ.get('SLACK_INSPECTION_WEBHOOK_URL', '').strip()
-          if not webhook:
-              print("⏭️  SLACK_INSPECTION_WEBHOOK_URL_B 미설정 — 건너뜀")
-              raise SystemExit(0)
-          payload = {"text": "✅ 계정 B 네이버 소재 검수 알림봇 연결 테스트 성공!\n(이 메시지가 보이면 Slack 웹훅 정상 동작 중입니다)"}
-          req = urllib.request.Request(
-              webhook,
-              data=json.dumps(payload).encode(),
-              headers={"Content-Type": "application/json"},
-              method="POST",
-          )
-          with urllib.request.urlopen(req, timeout=10) as r:
-              print(f"✅ Slack 전송 성공 (응답: {r.read().decode()})")
-          PYEOF
-        env:
-          SLACK_INSPECTION_WEBHOOK_URL: ${{ secrets.SLACK_INSPECTION_WEBHOOK_URL_B }}
-
       - name: 검수 알림 실행 (계정 B)
         run: |
           python - <<'PYEOF'
@@ -138,7 +117,6 @@ jobs:
           [ -f data/snapshot_account_b.json ] && git add data/snapshot_account_b.json || true
           git diff --cached --quiet \
             || git commit -m "chore: update snapshot account-b [skip ci]"
-          git stash || true
-          git pull --rebase origin main
-          git stash pop || true
-          git push
+          git fetch origin main
+          git rebase origin/main || git rebase --abort
+          git push || true
