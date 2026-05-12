@@ -20,7 +20,7 @@ on:
       target_range:
         description: '표 범위 (A1 시작 권장)'
         required: false
-        default: 'A1:U204'
+        default: 'A1:AG204'
       date_column:
         description: '날짜·첫 빈 행 기준 열 (A, B 등 — target_range 안)'
         required: false

@@ -35,7 +35,7 @@
  */
 
 /** 표 범위. 키워드는 기본적으로 이 범위의 1행(날짜 열 제외)에서 읽습니다(워크플로 ROW1). */
-var DEFAULT_TARGET_RANGE = 'A1:U204';
+var DEFAULT_TARGET_RANGE = 'A1:AG204';
 /** 날짜를 쓰고·빈 행을 찾는 열 (A열이 꽉 차 있고 B열만 비면 'B') */
 // 키워드는 ROW1 + date_column 제외 규칙을 사용합니다.
 // date_column='A' 이면 키워드 헤더는 자연스럽게 B1~U1 이 됩니다.

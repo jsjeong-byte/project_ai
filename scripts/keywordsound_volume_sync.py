@@ -1149,7 +1149,7 @@ def main() -> None:
         default="ROW1",
         help="ROW1·비움·HEADER: target_range 1행(날짜 열 제외)을 키워드로. 그 외: 별도 A1 범위",
     )
-    ap.add_argument("--target-range", default="A1:U204")
+    ap.add_argument("--target-range", default="A1:AG204")
     ap.add_argument(
         "--date-column",
         default="A",
