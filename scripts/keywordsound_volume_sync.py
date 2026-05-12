@@ -380,6 +380,11 @@ class KeywordSoundScraper:
             "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
+        # 광고·이미지 등 무거운 리소스 줄여 DataTables 로딩 속도 개선
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-plugins")
+        options.add_argument("--disable-background-networking")
+        options.add_argument("--blink-settings=imagesEnabled=false")
         return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     def _hide_ad_overlays(self) -> None:
@@ -407,12 +412,15 @@ class KeywordSoundScraper:
 
     def _wait_datatables_ready_once(self) -> None:
         t0 = time.time()
+        limit = max(self.timeout_sec, 90)
         while True:
             info = self.driver.execute_script(
                 """
                 try {
                   if (window.jQuery && jQuery.fn && jQuery.fn.dataTable) {
-                    return jQuery('#tableSearchVolume').DataTable().page.info();
+                    var dt = jQuery('#tableSearchVolume').DataTable();
+                    var pg = dt.page.info();
+                    return { recordsTotal: pg.recordsTotal, recordsDisplay: pg.recordsDisplay };
                   }
                   return null;
                 } catch (e) {
@@ -420,35 +428,45 @@ class KeywordSoundScraper:
                 }
                 """
             )
-            if isinstance(info, dict) and int(info.get("recordsDisplay") or 0) > 0:
-                return
-            if (time.time() - t0) > max(self.timeout_sec, 90):
+            # recordsTotal: 필터 전 전체 행 수 (필터가 걸려 recordsDisplay=0 이어도 데이터가 있으면 통과)
+            if isinstance(info, dict) and "error" not in info:
+                total = int(info.get("recordsTotal") or 0)
+                if total > 0:
+                    return
+            elapsed = time.time() - t0
+            if elapsed > limit:
                 raise RuntimeError(
                     "검색량 테이블(DataTables) 로딩 타임아웃 "
                     f"({self.timeout_sec}초). GitHub Actions 변수 "
                     "KEYWORDSOUND_DATATABLES_TIMEOUT_SEC=600 또는 "
                     "--keywordsound-timeout 600 으로 늘리세요. (최대 900초)"
                 )
-            time.sleep(0.25)
+            time.sleep(0.5 if elapsed < 30 else 1.5)
 
     def _wait_datatables_ready(self) -> None:
-        """타임아웃 시 1회 새로고침 후 동일 대기 재시도 (헤드리스에서 간헐적 공백 완화)."""
-        try:
-            self._wait_datatables_ready_once()
-        except RuntimeError as e:
-            if "타임아웃" not in str(e):
-                raise
-            time.sleep(2)
+        """타임아웃 시 최대 2회 새로고침 재시도 (헤드리스에서 간헐적 공백 완화)."""
+        last_err: Optional[RuntimeError] = None
+        for attempt in range(3):
             try:
-                self.driver.refresh()
-                self._hide_ad_overlays()
-                self.wait.until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "table#tableSearchVolume tbody"))
-                )
-                self._hide_ad_overlays()
-            except Exception:
-                raise e
-            self._wait_datatables_ready_once()
+                self._wait_datatables_ready_once()
+                return
+            except RuntimeError as e:
+                if "타임아웃" not in str(e):
+                    raise
+                last_err = e
+                if attempt < 2:
+                    print(f"  [재시도 {attempt + 1}/2] DataTables 타임아웃 → 페이지 새로고침")
+                    time.sleep(3)
+                    try:
+                        self.driver.refresh()
+                        self._hide_ad_overlays()
+                        self.wait.until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, "table#tableSearchVolume tbody"))
+                        )
+                        self._hide_ad_overlays()
+                    except Exception:
+                        pass
+        raise last_err  # type: ignore[misc]
 
     def fetch_totals_for_dates(self, keyword: str, want_dates: set[str]) -> Dict[str, int]:
         """want_dates 에 해당하는 날짜만 추출 (DataTables 전체 직렬화 없이 JS에서 필터)."""
