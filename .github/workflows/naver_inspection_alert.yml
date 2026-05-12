@@ -59,9 +59,8 @@ jobs:
           git add data/naver_ads_inspection_snapshot.json
           git diff --cached --quiet \
             || git commit -m "chore: update snapshot account-a [skip ci]"
-          git stash || true
-          git pull --rebase origin main
-          git stash pop || true
+          git fetch origin main
+          git merge -X ours origin/main --no-edit || true
           git push
 
   # ── 계정 B (추가) ─────────────────────────────────────────────────────────
@@ -118,5 +117,5 @@ jobs:
           git diff --cached --quiet \
             || git commit -m "chore: update snapshot account-b [skip ci]"
           git fetch origin main
-          git rebase origin/main || git rebase --abort
-          git push || true
+          git merge -X ours origin/main --no-edit || true
+          git push
