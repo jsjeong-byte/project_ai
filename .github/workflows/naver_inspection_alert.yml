@@ -6,7 +6,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  alert:
+  # ── 계정 A (기존) ─────────────────────────────────────────────────────────
+  alert-account-a:
+    name: 검수 알림 — 계정 A
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -18,85 +20,121 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 진단 및 알림 실행
+      - name: 검수 알림 실행 (계정 A)
         run: |
           python - <<'PYEOF'
           import sys, os, json, traceback
           sys.path.insert(0, '.')
 
-          # ── 1. Secrets 확인 ──────────────────────────────────────
           api_key    = os.environ.get('NAVER_AD_API_KEY', '').strip()
           secret_key = os.environ.get('NAVER_AD_SECRET_KEY', '').strip()
           cust_id    = os.environ.get('NAVER_AD_CUSTOMER_ID', '').strip()
-          # Slack webhook — 여러 Secret 이름 폴백
-          webhook = ''
-          for _wname in ('SLACK_INSPECTION_WEBHOOK_URL', 'SLACK_WEBHOOK_URL', 'SLACK_WEBHOOK'):
-              _w = os.environ.get(_wname, '').strip()
-              if _w:
-                  webhook = _w
-                  print(f"[1] SLACK_WEBHOOK     : ✅ 설정됨 (변수명={_wname}, 앞30자={_w[:30]})")
-                  break
-          else:
-              print("[1] SLACK_WEBHOOK     : ❌ 미설정 (SLACK_INSPECTION_WEBHOOK_URL / SLACK_WEBHOOK_URL / SLACK_WEBHOOK 모두 없음)")
+          webhook    = os.environ.get('SLACK_INSPECTION_WEBHOOK_URL', '').strip()
 
-          print(f"[1] NAVER_API_KEY     : {'✅ 설정됨 (' + str(len(api_key)) + '자)' if api_key else '❌ 미설정'}")
-          print(f"[1] NAVER_SECRET_KEY  : {'✅ 설정됨 (' + str(len(secret_key)) + '자)' if secret_key else '❌ 미설정'}")
-          print(f"[1] NAVER_CUSTOMER_ID : {'✅ 설정됨 (' + cust_id + ')' if cust_id else '❌ 미설정'}")
-
+          print(f"[계정A] CUSTOMER_ID: {cust_id or '❌ 미설정'}")
           if not (api_key and secret_key and cust_id and webhook):
-              print("\n❌ Secrets 미설정 — GitHub 저장소 Settings > Secrets > Actions 에서 확인:")
-              print("   NAVER_API_KEY / NAVER_SECRET_KEY / NAVER_CUSTOMER_ID / SLACK_INSPECTION_WEBHOOK_URL")
+              print("❌ Secrets 미설정")
               sys.exit(1)
 
-          # ── 2. Naver API 연결 테스트 ─────────────────────────────
-          print("\n[2] Naver API 연결 테스트...")
-          try:
-              from src.naver_ads.auth import NaverAdsCredentials, auth_headers
-              import urllib.request, urllib.error
-              creds = NaverAdsCredentials(api_key, secret_key, cust_id)
-              h = auth_headers('GET', '/ncc/campaigns', creds)
-              req = urllib.request.Request('https://api.naver.com/ncc/campaigns', headers=h)
-              with urllib.request.urlopen(req, timeout=20) as r:
-                  data = json.loads(r.read())
-              print(f"[2] ✅ API 연결 성공 — 캠페인 {len(data)}개")
-          except urllib.error.HTTPError as e:
-              body = e.read().decode('utf-8', errors='replace')
-              print(f"[2] ❌ API HTTP 오류 {e.code}: {body}")
-              sys.exit(1)
-          except Exception as e:
-              print(f"[2] ❌ 연결 오류: {type(e).__name__}: {e}")
-              traceback.print_exc()
-              sys.exit(1)
-
-          # ── 3. 본 스크립트 실행 ──────────────────────────────────
-          print("\n[3] 검수 알림 스크립트 실행...")
-          try:
-              import importlib.util
-              spec = importlib.util.spec_from_file_location(
-                  'alert', 'scripts/run_naver_inspection_alert.py')
-              mod = importlib.util.module_from_spec(spec)
-              spec.loader.exec_module(mod)
-              ret = mod.run_once(webhook, dry_run=False, verbose=True, only='search')
-              print(f"\n[3] 완료 (return={ret})")
-              sys.exit(ret)
-          except Exception as e:
-              print(f"[3] ❌ 스크립트 오류: {type(e).__name__}: {e}")
-              traceback.print_exc()
-              sys.exit(1)
+          import importlib.util
+          spec = importlib.util.spec_from_file_location('alert', 'scripts/run_naver_inspection_alert.py')
+          mod  = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          ret = mod.run_once(webhook, dry_run=False, verbose=True, only='search')
+          print(f"[계정A] 완료 (return={ret})")
+          sys.exit(ret)
           PYEOF
         env:
           NAVER_AD_API_KEY:             ${{ secrets.NAVER_API_KEY }}
           NAVER_AD_SECRET_KEY:          ${{ secrets.NAVER_SECRET_KEY }}
           NAVER_AD_CUSTOMER_ID:         ${{ secrets.NAVER_CUSTOMER_ID }}
           SLACK_INSPECTION_WEBHOOK_URL: ${{ secrets.SLACK_INSPECTION_WEBHOOK_URL }}
+          SNAPSHOT_FILE:                data/naver_ads_inspection_snapshot.json
 
-      - name: 스냅샷 업데이트 저장
+      - name: 스냅샷 저장 (계정 A)
         if: always()
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/naver_ads_inspection_snapshot.json
           git diff --cached --quiet \
-            || git commit -m "chore: update inspection snapshot [skip ci]"
+            || git commit -m "chore: update snapshot account-a [skip ci]"
+          git pull --rebase origin main
+          git push
+
+  # ── 계정 B (추가) ─────────────────────────────────────────────────────────
+  alert-account-b:
+    name: 검수 알림 — 계정 B
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Slack 테스트 메시지 (계정 B)
+        run: |
+          python - <<'PYEOF'
+          import os, json, urllib.request
+          webhook = os.environ.get('SLACK_INSPECTION_WEBHOOK_URL', '').strip()
+          if not webhook:
+              print("⏭️  SLACK_INSPECTION_WEBHOOK_URL_B 미설정 — 건너뜀")
+              raise SystemExit(0)
+          payload = {"text": "✅ 계정 B 네이버 소재 검수 알림봇 연결 테스트 성공!\n(이 메시지가 보이면 Slack 웹훅 정상 동작 중입니다)"}
+          req = urllib.request.Request(
+              webhook,
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=10) as r:
+              print(f"✅ Slack 전송 성공 (응답: {r.read().decode()})")
+          PYEOF
+        env:
+          SLACK_INSPECTION_WEBHOOK_URL: ${{ secrets.SLACK_INSPECTION_WEBHOOK_URL_B }}
+
+      - name: 검수 알림 실행 (계정 B)
+        run: |
+          python - <<'PYEOF'
+          import sys, os, json, traceback
+          sys.path.insert(0, '.')
+
+          api_key    = os.environ.get('NAVER_AD_API_KEY', '').strip()
+          secret_key = os.environ.get('NAVER_AD_SECRET_KEY', '').strip()
+          cust_id    = os.environ.get('NAVER_AD_CUSTOMER_ID', '').strip()
+          webhook    = os.environ.get('SLACK_INSPECTION_WEBHOOK_URL', '').strip()
+
+          print(f"[계정B] CUSTOMER_ID: {cust_id or '❌ 미설정'}")
+          if not (api_key and secret_key and cust_id and webhook):
+              print("⏭️  계정 B Secrets 미설정 — 건너뜀")
+              sys.exit(0)
+
+          import importlib.util
+          spec = importlib.util.spec_from_file_location('alert', 'scripts/run_naver_inspection_alert.py')
+          mod  = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          ret = mod.run_once(webhook, dry_run=False, verbose=True, only='search')
+          print(f"[계정B] 완료 (return={ret})")
+          sys.exit(ret)
+          PYEOF
+        env:
+          NAVER_AD_API_KEY:             ${{ secrets.NAVER_API_KEY_B }}
+          NAVER_AD_SECRET_KEY:          ${{ secrets.NAVER_SECRET_KEY_B }}
+          NAVER_AD_CUSTOMER_ID:         ${{ secrets.NAVER_CUSTOMER_ID_B }}
+          SLACK_INSPECTION_WEBHOOK_URL: ${{ secrets.SLACK_INSPECTION_WEBHOOK_URL_B }}
+          SNAPSHOT_FILE:                data/snapshot_account_b.json
+
+      - name: 스냅샷 저장 (계정 B)
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/snapshot_account_b.json
+          git diff --cached --quiet \
+            || git commit -m "chore: update snapshot account-b [skip ci]"
           git pull --rebase origin main
           git push
