@@ -60,7 +60,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 WEBHOOK_FILE = ROOT / ".credentials" / "slack_inspection_webhook_url.txt"
-SNAPSHOT_FILE = ROOT / "data" / "naver_ads_inspection_snapshot.json"
+# 환경변수 SNAPSHOT_FILE로 경로 오버라이드 가능 (다중 계정 지원)
+# 상대경로이면 ROOT 기준 절대경로로 변환
+_snapshot_env = os.environ.get("SNAPSHOT_FILE", "").strip()
+if _snapshot_env:
+    _p = Path(_snapshot_env)
+    SNAPSHOT_FILE = _p if _p.is_absolute() else ROOT / _p
+else:
+    SNAPSHOT_FILE = ROOT / "data" / "naver_ads_inspection_snapshot.json"
 DISPLAY_AD_ACCOUNTS_FILE = ROOT / ".credentials" / "naver_display_ad_accounts.txt"
 
 # ─── 알림 대상 상태 ───────────────────────────────────────────────────────────
