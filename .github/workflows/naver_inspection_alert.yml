@@ -111,6 +111,10 @@ jobs:
       - name: 스냅샷 저장 (계정 B)
         if: always()
         run: |
+          echo "=== data/ 폴더 파일 목록 ==="
+          ls -la data/
+          echo "=== snapshot_account_b.json 존재 여부 ==="
+          [ -f data/snapshot_account_b.json ] && echo "✅ 파일 있음" || echo "❌ 파일 없음"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if [ -f data/snapshot_account_b.json ]; then
@@ -122,7 +126,9 @@ jobs:
                 git merge -X ours origin/main --no-edit && \
                 git push && break || sleep 3
               done
+            else
+              echo "변경 없음 — 커밋 건너뜀"
             fi
           else
-            echo "snapshot_account_b.json 없음 — 건너뜀"
+            echo "❌ snapshot_account_b.json 없음 — 스크립트가 파일을 생성하지 못함"
           fi
