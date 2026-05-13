@@ -113,9 +113,16 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          [ -f data/snapshot_account_b.json ] && git add data/snapshot_account_b.json || true
-          git diff --cached --quiet \
-            || git commit -m "chore: update snapshot account-b [skip ci]"
-          git fetch origin main
-          git merge -X ours origin/main --no-edit || true
-          git push
+          if [ -f data/snapshot_account_b.json ]; then
+            git add data/snapshot_account_b.json
+            if ! git diff --cached --quiet; then
+              git commit -m "chore: update snapshot account-b [skip ci]"
+              for i in 1 2 3; do
+                git fetch origin main && \
+                git merge -X ours origin/main --no-edit && \
+                git push && break || sleep 3
+              done
+            fi
+          else
+            echo "snapshot_account_b.json 없음 — 건너뜀"
+          fi
